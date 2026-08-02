@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}規則設定 · 投資儀表板{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>我的目標 <span class="hint">會顯示在儀表板最上面</span></h2>
+  <form method="post" action="{{ url_for('settings_objective') }}">
+    <div class="field">
+      <textarea name="objective" rows="2"
+        placeholder="例：未來 12 個月產生 NT$X 可支配現金，且整體最大回撤不超過 15%。">{{ objective }}</textarea>
+    </div>
+    <button>儲存</button>
+    <span class="footnote" style="margin-left:10px">
+      寫成可量測的句子，不要寫「賺錢」。有了它，你想換標的時才有東西可以對照。
+    </span>
+  </form>
+</div>
+
+<div class="card">
+  <h2>交易規則 <span class="hint">這裡就是「寫死在系統裡的紀律」</span></h2>
+
+  <form method="post" action="{{ url_for('settings_rules') }}">
+    <div class="grid c4">
+      <div class="field">
+        <label>停損 %（跌破成本這麼多就出場）</label>
+        <input name="stop_loss_pct" type="number" step="0.5" min="0.5" max="90"
+               value="{{ rules.stop_loss_pct }}" required>
+      </div>
+      <div class="field">
+        <label>停利 %（漲超成本這麼多就出場）</label>
+        <input name="take_profit_pct" type="number" step="0.5" min="0.5"
+               value="{{ rules.take_profit_pct }}" required>
+      </div>
+      <div class="field">
+        <label>停損基準</label>
+        <select name="stop_basis">
+          <option value="cost" {{ 'selected' if rules.stop_basis == 'cost' }}>
+            以成本價計算（固定停損）
+          </option>
+          <option value="trailing" {{ 'selected' if rules.stop_basis == 'trailing' }}>
+            以進場後最高價計算（移動停損）
+          </option>
+        </select>
+      </div>
+      <div class="field">
+        <label>預警距離 %</label>
+        <input name="near_threshold_pct" type="number" step="0.5" min="0"
+               value="{{ rules.near_threshold_pct }}" required>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>為什麼改？（必填，會自動寫進下方的變更紀錄）</label>
+      <input name="reason" placeholder="例：8 月被雜訊掃出場兩次，停損從 10% 放寬到 12%">
+    </div>
+
+    <button>儲存規則</button>
+  </form>
+
+  <p class="footnote" style="margin-top:16px">
+    <b>什麼時候該改、什麼時候不該：</b><br>
+    「被停損掃出場好幾次，之後都漲回來」——可以考慮，但要等樣本夠多。<br>
+    「這次快到停損了，先放寬一下」——<b>這正是系統要防的事。</b>
+    真的要改也照改，但誠實寫下理由；兩個月後你看到那行字，會學到比任何回測都多。
+  </p>
+</div>
+
+<div class="card">
+  <h2>規則變更紀錄 <span class="hint">最新的在最上面</span></h2>
+  {% if changelog %}
+    {% for c in changelog %}
+      <div class="journal-entry">
+        <div>{{ c.note }}</div>
+        <div class="when">{{ c.date }}</div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty-note">還沒有變更紀錄。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>停損基準說明</h2>
+  <p style="font-size:14px;margin:0 0 10px">
+    <b>以成本價計算</b>（預設）：成本 100、停損 10% → 停損線固定在 90，
+    不管中間漲到多高。
+  </p>
+  <p style="font-size:14px;margin:0 0 10px">
+    <b>以進場後最高價計算</b>（移動停損）：成本 100、最高漲到 150 →
+    停損線變成 135，把獲利鎖住一部分。
+  </p>
+  <p class="footnote">
+    移動停損的歷史高點來自每日紀錄，所以剛啟用的前幾天會退化成用成本價計算，
+    儀表板會明確標註這件事，資料累積越久越準確。
+  </p>
+</div>
+
+{% endblock %}

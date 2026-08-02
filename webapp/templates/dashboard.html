@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if objective %}
+  <div class="objective"><b>目標</b>　{{ objective }}</div>
+{% endif %}
+
+{% for w in warnings %}
+  <div class="warn-box">{{ w }}</div>
+{% endfor %}
+
+<div class="card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+  <div class="meta">
+    行情日期 <b>{{ trade_date }}</b>
+    {% if fetched_at %}　·　資料抓取於 {{ fetched_at.strftime('%m/%d %H:%M') }}{% endif %}
+  </div>
+  <div class="spacer" style="flex:1"></div>
+  <form method="post" action="{{ url_for('refresh') }}">
+    <button class="ghost small">更新報價</button>
+  </form>
+</div>
+
+{# ---------- 今日待辦 ---------- #}
+<div class="card todo {{ 'empty' if not actionable }}">
+  <h2>今日待辦</h2>
+  {% if actionable %}
+    {% for r in actionable %}
+      {% set ev = r.ev %}
+      <div class="todo-item">
+        <h3>
+          <span class="pill {{ r.css }}">{{ ev.signal.label }}</span>
+          {{ ev.position.code }} {{ r.name }}
+        </h3>
+        <p>
+          現價 <b>{{ ev.quote.close | price }}</b>，
+          {% if ev.signal.value == 'STOP_LOSS' %}
+            已跌破停損線 {{ ev.stop_price | price }}
+          {% else %}
+            已突破停利線 {{ ev.target_price | price }}
+          {% endif %}
+          ，未實現
+          <b class="{{ 'up' if (ev.pnl_pct or 0) >= 0 else 'down' }}">
+            {{ ev.pnl_pct | pct }}（{{ ev.pnl | money }}）
+          </b>
+        </p>
+        <p class="why">
+          規則判定：<b>{% if ev.signal.value == 'STOP_LOSS' %}停損出場{% else %}停利出場{% endif %}</b>
+          —— 系統只負責計算與提醒，下單與否由你決定。
+        </p>
+        {% if ev.position.invalidate %}
+          <p class="why">當初設定的認錯條件：{{ ev.position.invalidate }}</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+    <p class="footnote">
+      如果你決定 <b>不</b> 照訊號執行，請在下方「決策紀錄」寫下理由。
+      那是兩個月後覆盤時最有價值的資料。
+    </p>
+  {% else %}
+    <p class="empty-note">沒有觸發停損或停利的部位，今天不需要動作。</p>
+  {% endif %}
+</div>
+
+{# ---------- 總覽 ---------- #}
+<div class="stats">
+  <div class="stat"><div class="k">持有檔數</div><div class="v">{{ summary.positions }}</div></div>
+  <div class="stat"><div class="k">總成本</div><div class="v">{{ summary.cost_basis | money }}</div></div>
+  <div class="stat"><div class="k">總市值</div><div class="v">{{ summary.market_value | money }}</div></div>
+  <div class="stat">
+    <div class="k">未實現損益</div>
+    <div class="v {{ 'up' if summary.pnl >= 0 else 'down' }}">
+      {{ summary.pnl | money }}<span style="font-size:14px"> ({{ summary.pnl_pct | pct }})</span>
+    </div>
+  </div>
+</div>
+<div style="height:18px"></div>
+
+{# ---------- 持股 ---------- #}
+<div class="card">
+  <h2>持股 <span class="hint">觸發訊號的排在最前面</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>代號</th><th>名稱</th>
+        <th class="num">收盤</th><th class="num">當日</th>
+        <th class="num">成本</th><th class="num">未實現</th>
+        <th class="num">停損線</th><th class="num">距停損</th>
+        <th class="num">停利線</th><th class="num">距停利</th>
+        <th class="num">持有</th><th>狀態</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      {% set ev = r.ev %}
+      <tr>
+        <td class="code">{{ ev.position.code }}</td>
+        <td class="name">{{ r.name }}</td>
+        <td class="num">{{ ev.quote.close | price if ev.quote else '—' }}</td>
+        <td class="num {{ 'up' if ev.quote and (ev.quote.change_pct or 0) >= 0 else 'down' }}">
+          {{ ev.quote.change_pct | pct if ev.quote else '—' }}
+        </td>
+        <td class="num">{{ ev.position.cost | price }}</td>
+        <td class="num {{ 'up' if (ev.pnl_pct or 0) >= 0 else 'down' }}">{{ ev.pnl_pct | pct }}</td>
+        {% if ev.position.core %}
+          <td class="num">—</td><td class="num">—</td>
+          <td class="num">—</td><td class="num">—</td>
+        {% else %}
+          <td class="num">{{ ev.stop_price | price }}</td>
+          <td class="num">{{ ev.pct_to_stop | pct }}</td>
+          <td class="num">{{ ev.target_price | price }}</td>
+          <td class="num">{{ ev.pct_to_target | pct }}</td>
+        {% endif %}
+        <td class="num">{{ ev.position.holding_days() }}天</td>
+        <td><span class="pill {{ r.css }}">{{ ev.signal.label }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="12" class="empty-note">還沒有持股，用下面的表單新增第一筆。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="footnote">
+    「距停損」／「距停利」＝ 現價要再變動多少 % 才會碰到那條線。<br>
+    距停損 −14% ＝ 還要再跌 14% 才停損（仍有緩衝）；轉為正數代表已經跌破。
+  </p>
+</div>
+
+{# ---------- 新增 / 出場 ---------- #}
+<div class="card">
+  <h2>持股異動</h2>
+
+  <details class="form-block">
+    <summary>新增持股</summary>
+    <div>
+      <form method="post" action="{{ url_for('position_add') }}">
+        <div class="grid c4">
+          <div class="field">
+            <label>股票代號</label>
+            <input name="code" required placeholder="2330" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label>股數（1 張 = 1000 股）</label>
+            <input name="shares" type="number" min="1" required placeholder="1000">
+          </div>
+          <div class="field">
+            <label>每股成本</label>
+            <input name="cost" type="number" step="0.01" min="0" required placeholder="1980.00">
+          </div>
+          <div class="field">
+            <label>進場日</label>
+            <input name="entry_date" type="date" value="{{ today }}" required>
+          </div>
+        </div>
+        <div class="grid c2">
+          <div class="field">
+            <label>我為什麼買（一句話）</label>
+            <input name="thesis" placeholder="先進製程訂單能見度高">
+          </div>
+          <div class="field">
+            <label>什麼情況代表我錯了</label>
+            <input name="invalidate" placeholder="稼動率下滑或大客戶砍單">
+          </div>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" name="core" style="width:auto">
+            核心部位（長期持有的 ETF 等，不套用停損停利訊號）
+          </label>
+        </div>
+        <button>新增</button>
+        <span class="footnote" style="margin-left:10px">
+          建議在按下買進 <b>之前</b> 就填好右邊兩欄——買完再補寫的理由會被「我已經買了」影響。
+        </span>
+      </form>
+    </div>
+  </details>
+
+  <details class="form-block">
+    <summary>登記出場</summary>
+    <div>
+      <form method="post" action="{{ url_for('position_exit') }}">
+        <input type="hidden" name="trade_date" value="{{ trade_date }}">
+        <div class="grid c4">
+          <div class="field">
+            <label>要出場的部位</label>
+            <select name="code" required>
+              <option value="">請選擇…</option>
+              {% for r in rows %}
+                <option value="{{ r.ev.position.code }}">
+                  {{ r.ev.position.code }} {{ r.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>成交價</label>
+            <input name="exit_price" type="number" step="0.01" min="0" required>
+          </div>
+          <div class="field">
+            <label>出場日</label>
+            <input name="exit_date" type="date" value="{{ today }}" required>
+          </div>
+          <div class="field">
+            <label>理由</label>
+            <input name="reason" placeholder="照系統停損訊號執行">
+          </div>
+        </div>
+        <button class="danger">登記出場</button>
+        <span class="footnote" style="margin-left:10px">
+          部位會從上面的表格移除，但紀錄保留在「已出場」區。
+        </span>
+      </form>
+    </div>
+  </details>
+</div>
+
+{# ---------- 買進理由 ---------- #}
+{% if rows %}
+<div class="card">
+  <h2>當初的買進理由 <span class="hint">每天看一次：理由現在還成立嗎？</span></h2>
+  {% for r in rows %}
+    {% set p = r.ev.position %}
+    <div class="thesis-item">
+      <div>
+        <b class="code">{{ p.code }}</b> <span class="name">{{ r.name }}</span>
+        　<span class="meta">{{ p.entry_date }} 進場</span>
+        　<span class="{{ 'up' if (r.ev.pnl_pct or 0) >= 0 else 'down' }}">{{ r.ev.pnl_pct | pct }}</span>
+      </div>
+      <div class="t"><b>買進理由：</b>{{ p.thesis or '（未填寫）' }}</div>
+      <div class="t"><b>認錯條件：</b>{{ p.invalidate or '（未填寫）' }}</div>
+      {% for note in r.ev.notes %}
+        <div class="t" style="color:var(--warn)">⚠️ {{ note }}</div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+  <p class="footnote">
+    理由不成立了 → 就算沒到停損線也該考慮出場。理由還成立 → 就算帳面虧損也不必恐慌。<br>
+    停損線防的是「虧太多」，這一段防的是「抱著一個已經錯掉的理由」。
+  </p>
+</div>
+{% endif %}
+
+{# ---------- 觀察清單 ---------- #}
+<div class="card">
+  <h2>觀察清單</h2>
+  {% if watch_rows %}
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th>代號</th><th>名稱</th><th class="num">收盤</th><th class="num">當日</th>
+      <th>備註</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for w in watch_rows %}
+      <tr>
+        <td class="code">{{ w.code }}</td>
+        <td class="name">{{ w.quote.name if w.quote else '—' }}</td>
+        <td class="num">{{ w.quote.close | price if w.quote else '查無行情' }}</td>
+        <td class="num {{ 'up' if w.quote and (w.quote.change_pct or 0) >= 0 else 'down' }}">
+          {{ w.quote.change_pct | pct if w.quote else '—' }}
+        </td>
+        <td class="name">{{ w.note }}</td>
+        <td class="num">
+          <form method="post" action="{{ url_for('watch_remove') }}">
+            <input type="hidden" name="code" value="{{ w.code }}">
+            <button class="ghost small">移除</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <p class="empty-note">觀察清單是空的。</p>
+  {% endif %}
+
+  <details class="form-block" style="margin-top:10px">
+    <summary>加入觀察</summary>
+    <div>
+      <form method="post" action="{{ url_for('watch_add') }}">
+        <div class="grid c3">
+          <div class="field"><label>代號</label>
+            <input name="code" required placeholder="00919"></div>
+          <div class="field" style="grid-column:span 2"><label>備註</label>
+            <input name="note" placeholder="觀察配息穩定度"></div>
+        </div>
+        <button>加入</button>
+      </form>
+    </div>
+  </details>
+</div>
+
+{# ---------- 已出場 ---------- #}
+{% if closed_rows %}
+<div class="card">
+  <h2>已出場 <span class="hint">已實現損益合計 {{ realized_total | money }}</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th>代號</th><th>名稱</th><th class="num">成本</th><th class="num">出場價</th>
+      <th class="num">已實現</th><th class="num">報酬率</th>
+      <th>進場</th><th>出場</th><th>當初理由</th>
+    </tr></thead>
+    <tbody>
+    {% for c in closed_rows %}
+      <tr>
+        <td class="code">{{ c.position.code }}</td>
+        <td class="name">{{ c.name }}</td>
+        <td class="num">{{ c.position.cost | price }}</td>
+        <td class="num">{{ c.exit_price | price }}</td>
+        <td class="num {{ 'up' if c.realized >= 0 else 'down' }}">{{ c.realized | money }}</td>
+        <td class="num {{ 'up' if c.realized >= 0 else 'down' }}">{{ c.realized_pct | pct }}</td>
+        <td class="name">{{ c.position.entry_date }}</td>
+        <td class="name">{{ c.position.exit_date }}</td>
+        <td class="name">{{ c.position.thesis }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="footnote">
+    覆盤時的關鍵問題不是賺賠，而是：<b>當初的理由回頭看是對的嗎？</b>
+    賺錢但理由是錯的，那次是運氣，別把它當成方法。
+  </p>
+</div>
+{% endif %}
+
+{# ---------- 決策紀錄 ---------- #}
+<div class="card">
+  <h2>決策紀錄 <span class="hint">{{ trade_date }}</span></h2>
+  {% if journal %}
+    {% for j in journal %}
+      <div class="journal-entry">
+        <div>{{ j.text }}</div>
+        <div class="when">{{ j.logged_at.replace('T', ' ') }}　·　{{ j.tag }}</div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty-note">今天還沒有紀錄。</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('journal_add') }}" style="margin-top:14px">
+    <input type="hidden" name="trade_date" value="{{ trade_date }}">
+    <div class="field">
+      <textarea name="text" rows="2"
+        placeholder="今天做了什麼、為什麼。若覆蓋了系統訊號，寫下理由。"></textarea>
+    </div>
+    <button>記錄</button>
+  </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}歷史 · 投資儀表板{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>決策紀錄 <span class="hint">最近 100 筆，最新的在最上面</span></h2>
+  {% if journal %}
+    {% for j in journal %}
+      <div class="journal-entry">
+        <div>{{ j.text }}</div>
+        <div class="when">{{ j.trade_date }}　·　{{ j.tag }}　·　記於 {{ j.logged_at.replace('T', ' ') }}</div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty-note">還沒有任何決策紀錄。</p>
+  {% endif %}
+  <p class="footnote">
+    兩個月後覆盤時，這裡比任何數字都有用——特別是你 <b>覆蓋系統訊號</b> 的那幾次。
+  </p>
+</div>
+
+<div class="card">
+  <h2>每日報告存檔 <span class="hint">背景排程每天自動產生</span></h2>
+  {% if reports %}
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>交易日</th><th>檔案</th></tr></thead>
+      <tbody>
+      {% for d in reports %}
+        <tr>
+          <td class="code">{{ d }}</td>
+          <td class="name">data/reports/{{ d }}.md</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="empty-note">還沒有報告存檔。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>覆盤時該問的四個問題</h2>
+  <ol style="font-size:14px;padding-left:20px;margin:0">
+    <li style="margin-bottom:8px">
+      <b>系統發出的訊號，我實際執行了幾次？</b><br>
+      <span class="meta">執行率遠低於 100%，問題不在系統，在紀律。這是模擬期最該發現的事。</span>
+    </li>
+    <li style="margin-bottom:8px">
+      <b>我覆蓋系統判斷的那幾次，事後對還是錯？</b><br>
+      <span class="meta">通常是錯的 → 以後別覆蓋。通常是對的 → 把你的直覺變成規則。</span>
+    </li>
+    <li style="margin-bottom:8px">
+      <b>停損被觸發的那幾檔，之後漲回去了嗎？</b><br>
+      <span class="meta">常常漲回去 = 停損太緊，被波動掃出場，考慮放寬。</span>
+    </li>
+    <li>
+      <b>當初的 thesis，回頭看有幾個是對的？</b><br>
+      <span class="meta">表現好但理由是錯的 → 那次是運氣，別把它當成方法。</span>
+    </li>
+  </ol>
+</div>
+
+{% endblock %}

@@ -1,0 +1,35 @@
+#!/bin/bash
+# 投資儀表板啟動器。雙擊 .app 時執行。
+# 行為：伺服器沒在跑就啟動它；已經在跑就直接開瀏覽器分頁。
+
+set -u
+URL="http://127.0.0.1:5173/"
+
+# 從 .app/Contents/MacOS/ 往上三層回到專案根目錄
+# 用實體路徑解析：經由桌面捷徑（符號連結）啟動時，
+# 邏輯路徑的 ".." 會走到捷徑所在的資料夾而不是專案，因此必須用 cd -P / pwd -P。
+ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && cd ../../../.. && pwd -P)"
+cd "$ROOT" || exit 1
+mkdir -p data
+LOG="$ROOT/data/app.log"
+
+alive() { curl -s -o /dev/null --max-time 2 "$URL"; }
+
+if alive; then
+  open "$URL"
+  exit 0
+fi
+
+PY="$(command -v python3 || echo /usr/bin/python3)"
+echo "--- $(date '+%Y-%m-%d %H:%M:%S') 啟動 ---" >> "$LOG"
+nohup "$PY" webapp/app.py >> "$LOG" 2>&1 &
+
+# 等伺服器就緒（app.py 就緒後會自己開瀏覽器）
+for _ in $(seq 1 60); do
+  alive && exit 0
+  sleep 0.25
+done
+
+# 起不來就把錯誤訊息顯示出來，不要靜默失敗
+osascript -e 'display alert "投資儀表板啟動失敗" message "請查看 data/app.log 了解原因。常見原因是尚未安裝套件，可在終端機執行：pip3 install -r requirements.txt" as critical' >/dev/null 2>&1
+exit 1

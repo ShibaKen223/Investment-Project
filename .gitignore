@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+
+# 原始行情快取檔案很大，可以重抓，不必進版控
+data/raw/
+
+# 報告與訊號紀錄「要」進版控 —— 那是你的覆盤證據。
+# 如果不想公開持股，改成把整個 repo 設為 private，
+# 不要用 .gitignore 把 data/reports/ 和 data/signals.jsonl 排除掉。
+config/mail.yaml
+data/app.log
+data/daily.log
+data/quotes_cache.json
+data/backups/

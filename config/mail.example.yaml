@@ -1,0 +1,42 @@
+# ============================================================
+# Email 通知設定 —— 範本
+# ============================================================
+# 使用方式:
+#   1. 把這個檔案複製成 config/mail.yaml
+#   2. 填入下面的欄位
+#   3. 把 enabled 改成 true
+#
+# ⚠️ config/mail.yaml 已被 .gitignore 排除，不會進版控。
+#    請不要把填好的檔案分享給任何人，也不要貼到聊天視窗裡。
+# ------------------------------------------------------------
+
+enabled: false
+
+# --- Gmail 使用者 ---
+# Gmail 不接受你的登入密碼，必須用「應用程式密碼」(App Password)。
+# 取得方式（全程在 Google 官方頁面操作，不要把密碼給任何人）:
+#   1. 前往 https://myaccount.google.com/security 開啟「兩步驟驗證」
+#   2. 前往 https://myaccount.google.com/apppasswords
+#   3. 建立一組應用程式密碼，會拿到 16 碼字串（形如 abcd efgh ijkl mnop）
+#   4. 貼進下面的 app_password（空格可留可去，都能用）
+#
+smtp_host: "smtp.gmail.com"
+smtp_port: 465          # 465 = SSL；若要用 STARTTLS 改成 587
+
+username: "your-address@gmail.com"
+app_password: "請貼上 16 碼應用程式密碼"
+
+# 收件人。要寄給多個人就寫成清單。
+to: "your-address@gmail.com"
+# to:
+#   - "your-address@gmail.com"
+#   - "another@example.com"
+
+# ------------------------------------------------------------
+# 其他信箱供應商的設定（擇一取代上面的 smtp_host / smtp_port）
+# ------------------------------------------------------------
+#   Outlook / Hotmail   smtp-mail.outlook.com   587
+#   Yahoo               smtp.mail.yahoo.com     465
+#   iCloud              smtp.mail.me.com        587
+# ------------------------------------------------------------
+# 寄信時機：只有在「有部位觸發停損或停利」時才會寄，平常不會打擾你。

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}投資儀表板{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>投資儀表板</h1>
+    <div class="spacer"></div>
+    <nav>
+      <a href="{{ url_for('dashboard') }}"
+         class="{{ 'active' if request.endpoint == 'dashboard' }}">今日</a>
+      <a href="{{ url_for('history') }}"
+         class="{{ 'active' if request.endpoint == 'history' }}">歷史</a>
+      <a href="{{ url_for('settings') }}"
+         class="{{ 'active' if request.endpoint.startswith('settings') }}">規則設定</a>
+    </nav>
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+
+  <p class="footnote" style="display:flex;align-items:flex-end;gap:16px">
+    <span style="flex:1">
+      本工具依你自己設定的規則做計算與提醒，不構成投資建議。所有下單決策由你本人負責。<br>
+      資料僅存放在這台電腦上，不會上傳到任何地方。
+    </span>
+    <form method="post" action="{{ url_for('quit_app') }}">
+      <button class="ghost small">結束儀表板</button>
+    </form>
+  </p>
+
+</div>
+</body>
+</html>
