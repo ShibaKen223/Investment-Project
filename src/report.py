@@ -34,6 +34,135 @@ def _quote_line(quote: Quote) -> str:
     return f"{_price(quote.close)} ({_pct(quote.change_pct)})"
 
 
+def build_paper_section(paper_data: dict | None) -> list[str]:
+    """模擬倉的決策報告。
+
+    這一段要回答三個問題，缺一不可:
+        今天成交了什麼？明天要下什麼單？為什麼其他標的沒買？
+    第三個問題最容易被省略，但它才是你之後調參數的依據——
+    只報告「做了什麼」而不報告「沒做什麼」，你會誤以為系統沒機會，
+    實際上可能是名額滿了或資金不夠。
+    """
+    if paper_data is None:
+        return []
+
+    lines: list[str] = ["## 🧪 模擬倉", ""]
+    lines.append(
+        "> **這一段完全是虛擬的。** 沒有連接任何券商，不會送出任何真實委託。"
+        "目的是累積「這套規則實際會做什麼決定」的證據。"
+    )
+    lines.append("")
+
+    if "skipped" in paper_data:
+        lines.append(f"- {paper_data['skipped']}")
+        lines.append("")
+        return lines
+
+    result = paper_data["result"]
+    stats = paper_data["stats"]
+    account = paper_data["account"]
+    params = paper_data["params"]
+
+    # --- 今天成交了什麼 ---
+    lines.append("### 今日成交（昨日委託，以今日開盤價）")
+    lines.append("")
+    filled = [f for f in result.fills if f.get("status") == "FILLED"]
+    if filled:
+        for fill in filled:
+            side = "買進" if fill["side"] == "BUY" else "賣出"
+            line = (
+                f"- **{side} {fill['code']}** {fill['shares']:,} 股 @ "
+                f"{fill['price']:,.2f}（手續費 {fill.get('fee', 0):,.0f}"
+            )
+            if fill["side"] == "SELL":
+                line += f"、證交稅 {fill.get('tax', 0):,.0f}）"
+                line += (
+                    f" → 淨損益 {_money(fill.get('net_pnl'))} "
+                    f"（{_pct(fill.get('net_pnl_pct'))}）"
+                )
+            else:
+                line += "）"
+            lines.append(line)
+            if fill.get("detail"):
+                lines.append(f"  - 理由：{fill['detail']}")
+    else:
+        lines.append("- 今日無成交。")
+
+    unfilled = [f for f in result.fills if f.get("status") != "FILLED"]
+    for fill in unfilled:
+        lines.append(
+            f"- ⚠️ {fill['code']} 委託未成交（{fill['status']}）：{fill['detail']}"
+        )
+    lines.append("")
+
+    # --- 明天要下什麼單 ---
+    lines.append("### 明日開盤委託")
+    lines.append("")
+    orders = result.sell_orders + result.buy_orders
+    if orders:
+        for order in orders:
+            side = "買進" if order.side == "BUY" else "賣出"
+            lines.append(
+                f"- **{side} {order.code}** {order.shares:,} 股 — {order.detail}"
+            )
+    else:
+        lines.append("- 明日無委託。")
+    lines.append("")
+
+    # --- 為什麼其他標的沒買 ---
+    if result.rejected:
+        lines.append("<details><summary>其他標的今天為什麼沒進場</summary>")
+        lines.append("")
+        for item in result.rejected:
+            lines.append(f"- **{item['code']}**：{item['reason']}")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
+    # --- 模擬倉現況 ---
+    lines.append("### 模擬倉現況")
+    lines.append("")
+    lines.append("| 項目 | 數值 |")
+    lines.append("| --- | ---: |")
+    lines.append(f"| 淨值 | {_money(result.equity)} |")
+    lines.append(f"| 現金 | {_money(result.cash)} |")
+    lines.append(f"| 持有檔數 | {result.holdings} / {paper_data['account_params'].max_positions} |")
+    lines.append(f"| 累計報酬 | {_pct(stats['total_return_pct'])} |")
+    lines.append(f"| 最大回撤 | {_pct(stats['max_drawdown_pct'])} |")
+    lines.append(f"| 完成交易 | {stats['trades']} 筆（勝率 {stats['win_rate']:.0f}%）|")
+    lines.append(f"| 累計手續費+稅 | {_money(stats['total_fees'])} |")
+    lines.append("")
+
+    if account.positions:
+        lines.append("| 持股 | 股數 | 進場價 | 進場日 | 已抱 | 出場條件 |")
+        lines.append("| --- | ---: | ---: | --- | ---: | --- |")
+        for code, pos in account.positions.items():
+            stop = pos.entry_price * (1 - params.stop_loss_pct / 100)
+            target = pos.entry_price * (1 + params.take_profit_pct / 100)
+            lines.append(
+                f"| {code} | {pos.shares:,} | {pos.entry_price:,.2f} | "
+                f"{pos.entry_date} | {pos.bars_held}/{params.max_hold_bars} 根 | "
+                f"停損 {stop:,.2f} ／ 停利 {target:,.2f} |"
+            )
+        lines.append("")
+
+    # --- 誠實提醒 ---
+    if paper_data.get("warmup_short"):
+        lines.append(
+            f"> ⚠️ 這些標的歷史資料還不足 {params.warmup_bars} 根，"
+            f"暫時不會產生進場訊號：{'、'.join(paper_data['warmup_short'])}"
+        )
+        lines.append("")
+    if 0 < stats["trades"] < 30:
+        lines.append(
+            f"> ⚠️ 目前只有 {stats['trades']} 筆完成交易，樣本太小，"
+            "上面的勝率與報酬還不具統計意義。不要依據它調整參數。"
+        )
+        lines.append("")
+
+    return lines
+
+
 def build_report(
     *,
     trade_date: str,
@@ -43,6 +172,7 @@ def build_report(
     summary: dict,
     watchlist: list[tuple[dict, Quote | None]],
     warnings: list[str],
+    paper_data: dict | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -92,6 +222,9 @@ def build_report(
     else:
         lines.append("- 無觸發停損或停利的部位，今日不需動作。")
     lines.append("")
+
+    # --- 模擬倉（若啟用） ---
+    lines.extend(build_paper_section(paper_data))
 
     # --- 投組總覽 ---
     lines.append("## 投組總覽")
