@@ -457,16 +457,40 @@ def research():
     )
 
 
-def main() -> None:
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """那個連接埠是不是已經有人在用。"""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex((host, port)) == 0
+
+
+def main() -> int:
     import webbrowser
     import threading
 
     port = 5173
     url = f"http://127.0.0.1:{port}/"
+
+    # 先確認連接埠沒被佔用再啟動。
+    # 不能靠 try/except 包 app.run()：Werkzeug 會自己攔截這個錯誤、
+    # 印出它自己的英文訊息然後結束，我們的 except 根本輪不到。
+    if _port_in_use(port):
+        print(
+            f"連接埠 {port} 已經被佔用了。\n\n"
+            f"通常代表儀表板已經在跑——先看看 {url} 開不開得起來。\n"
+            f"如果打不開，就是舊的行程當掉了，執行這行結束它再重開：\n\n"
+            f"    pkill -f 'webapp/app.py'\n",
+            file=sys.stderr,
+        )
+        return 1
+
     threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     print(f"投資儀表板已啟動：{url}\n關閉這個視窗即可結束。")
     app.run(host="127.0.0.1", port=port, debug=False)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
