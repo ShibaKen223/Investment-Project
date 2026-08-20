@@ -20,6 +20,34 @@
   </form>
 </div>
 
+{# ---------- 還沒有持股：先講該怎麼開始，而不是丟一堆空表格 ---------- #}
+{% if not rows %}
+<div class="card onboard">
+  <h2>還沒有登記任何持股</h2>
+  <p class="lead" style="margin-bottom:10px">
+    如果你<b>還沒買任何股票</b>，這是正常的——現在什麼都不用填。
+  </p>
+  <ol class="help-steps" style="margin-bottom:6px">
+    <li>
+      到最下面的「<b>觀察清單</b>」加入你有興趣的代號，每天就會看到它們的報價。
+    </li>
+    <li>
+      到「<a href="{{ url_for('research') }}">研究</a>」頁看那幾檔在做什麼——
+      產業位置、營收跟著什麼跑、不懂的名詞也可以直接查。
+    </li>
+    <li>
+      <b>真的買進之後</b>，再回到這頁的「持股異動」登記，
+      停損提醒才會針對你的錢。
+    </li>
+  </ol>
+  <p class="footnote" style="margin-bottom:0">
+    第一次用建議先看
+    <a href="{{ url_for('help_page') }}"><b>說明</b></a>，
+    三分鐘就能搞懂這套系統在做什麼、不做什麼。
+  </p>
+</div>
+{% endif %}
+
 {# ---------- 今日待辦 ---------- #}
 <div class="card todo {{ 'empty' if not actionable }}">
   <h2>今日待辦</h2>
@@ -57,7 +85,14 @@
       那是兩個月後覆盤時最有價值的資料。
     </p>
   {% else %}
-    <p class="empty-note">沒有觸發停損或停利的部位，今天不需要動作。</p>
+    {% if rows %}
+      <p class="empty-note">沒有觸發停損或停利的部位，今天不需要動作。</p>
+    {% else %}
+      <p class="empty-note">
+        還沒有登記持股，所以沒有需要監控的部位。
+        觀察清單裡的標的仍會每天更新報價。
+      </p>
+    {% endif %}
   {% endif %}
 </div>
 
@@ -115,7 +150,12 @@
         <td><span class="pill {{ r.css }}">{{ ev.signal.label }}</span></td>
       </tr>
     {% else %}
-      <tr><td colspan="12" class="empty-note">還沒有持股，用下面的表單新增第一筆。</td></tr>
+      <tr>
+        <td colspan="12" class="empty-note">
+          還沒有持股。<b>真的買進之後</b>再用下面的「持股異動」登記——
+          沒買就不用填，這頁會一直顯示「今天不需要動作」。
+        </td>
+      </tr>
     {% endfor %}
     </tbody>
   </table>

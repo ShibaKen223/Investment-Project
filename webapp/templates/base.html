@@ -21,6 +21,8 @@
          class="{{ 'active' if request.endpoint == 'history' }}">歷史</a>
       <a href="{{ url_for('settings') }}"
          class="{{ 'active' if request.endpoint.startswith('settings') }}">規則設定</a>
+      <a href="{{ url_for('help_page') }}"
+         class="{{ 'active' if request.endpoint == 'help_page' }}">說明</a>
     </nav>
   </header>
 

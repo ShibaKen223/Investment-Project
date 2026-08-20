@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}說明 · 投資儀表板{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>這套系統在做什麼</h2>
+  <p class="lead">
+    核心只有一句：<b>規則寫在系統裡，不寫在腦袋裡。</b>
+  </p>
+  <p>
+    你事先訂好「跌多少要停損、漲多少要停利」，系統每天收盤後自動比對，
+    有事才提醒你。這樣做的目的不是讓你賺更多，
+    是讓你<b>在盤中情緒上來的時候，有一條事先冷靜訂下的線可以依靠</b>。
+  </p>
+
+  <div class="help-grid">
+    <div class="help-do">
+      <h3>它會做的事</h3>
+      <ul>
+        <li>每天自動抓收盤行情</li>
+        <li>算出你每檔的損益、距離停損停利還有多遠</li>
+        <li>觸發時提醒你（可設定寄 Email）</li>
+        <li>把每天的判斷存下來，讓你兩個月後能覆盤</li>
+        <li>用虛擬資金跑一套波段策略給你看（模擬倉）</li>
+      </ul>
+    </div>
+    <div class="help-dont">
+      <h3>它<u>不會</u>做的事</h3>
+      <ul>
+        <li><b>不會幫你下單。</b>沒有連接任何券商</li>
+        <li><b>不會告訴你該買什麼。</b>選股是你的事</li>
+        <li><b>不會預測漲跌</b>，也不解釋為什麼漲</li>
+        <li>不會自動幫你停損——它只提醒，按下去的人是你</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>最容易搞混的一件事</h2>
+  <p>系統裡有<b>兩個不同的東西</b>，剛開始很容易搞混：</p>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th></th><th>持股監控（「今日」頁）</th><th>模擬倉（paper trading）</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>追蹤什麼</b></td>
+          <td>你<b>真實持有</b>的股票</td>
+          <td>系統自己的虛擬帳戶</td>
+        </tr>
+        <tr>
+          <td><b>錢是真的嗎</b></td>
+          <td>你的真錢</td>
+          <td>假的，虛擬 100 萬</td>
+        </tr>
+        <tr>
+          <td><b>誰決定買賣</b></td>
+          <td><b>你</b>，系統只提醒</td>
+          <td>系統照波段規則自己決定</td>
+        </tr>
+        <tr>
+          <td><b>要你做什麼</b></td>
+          <td>買賣之後回來登記</td>
+          <td>什麼都不用，它自己跑</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="footnote">
+    模擬倉<b>永遠是假的</b>，那是刻意的設計。
+    它不接券商、不下真單，目的是先累積幾個月「這套規則會做出什麼決定」的證據，
+    等你看過實際績效，再決定要不要用真錢照著做。
+  </p>
+</div>
+
+<div class="card">
+  <h2>我還沒有買任何股票，該做什麼</h2>
+  <p>那你現在<b>什麼都不用填</b>。這樣用就好：</p>
+  <ol class="help-steps">
+    <li>
+      <b>把觀察清單建起來</b><br>
+      在「今日」頁最下面的「觀察清單」加入你有興趣的股票代號。
+      加了之後每天都會看到它們的報價，「研究」頁也會分析它們。
+    </li>
+    <li>
+      <b>去「研究」頁看看那幾檔在做什麼</b><br>
+      它會告訴你這家公司在供應鏈的哪個位置、營收跟著什麼跑、
+      現在的價格在過去一年的什麼位置，以及看新聞時該注意什麼。
+      不懂的名詞（PCB、封裝、本益比…）那頁下面可以直接查。
+    </li>
+    <li>
+      <b>看模擬倉每天做什麼決定</b><br>
+      它會照波段規則自己進出，每天在報告裡說明買了什麼、為什麼買、
+      以及<b>為什麼其他檔沒買</b>。看幾個月，你會對「規則化的交易長什麼樣」有概念。
+    </li>
+    <li>
+      <b>真的買進之後，回來登記</b><br>
+      「今日」頁 →「持股異動」→「新增持股」，填代號、股數、成本、進場日。
+      這時停損提醒才會針對你的錢。
+    </li>
+  </ol>
+  <p class="footnote">
+    沒有持股的時候，「今日待辦」會一直說「今天不需要動作」——那是正常的，不是壞掉。
+  </p>
+</div>
+
+<div class="card">
+  <h2>每天要做什麼</h2>
+  <p class="lead">大約 30 秒。</p>
+  <ol class="help-steps">
+    <li><b>看「今日待辦」</b>——沒事它會直接說沒事，關掉就好。</li>
+    <li>
+      <b>有訊號的話，看一眼再決定。</b>
+      系統說該停損，不代表你一定要照做，但如果決定不照做，
+      請在「決策紀錄」寫一行為什麼。
+    </li>
+    <li>
+      <b>真正該花時間的是「當初的買進理由」那一段。</b>
+      問自己一句：<b>理由現在還成立嗎？</b>
+    </li>
+  </ol>
+  <p class="footnote">
+    停損線防的是「虧太多」；「當初的買進理由」防的是
+    <b>抱著一個已經錯掉的理由</b>。後者通常傷得更深，因為它不會觸發任何警報。
+  </p>
+</div>
+
+<div class="card">
+  <h2>四個頁面</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>頁面</th><th>什麼時候看</th><th>裡面有什麼</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>今日</b></td>
+          <td>每天</td>
+          <td>待辦訊號、投組總覽、持股明細、買進理由、觀察清單、決策紀錄</td>
+        </tr>
+        <tr>
+          <td><b>研究</b></td>
+          <td>想了解某一檔時</td>
+          <td>價格分析、產業背景、該去查什麼、名詞辭典</td>
+        </tr>
+        <tr>
+          <td><b>歷史</b></td>
+          <td>覆盤時（每季一次就夠）</td>
+          <td>過去的決策紀錄與每日報告存檔</td>
+        </tr>
+        <tr>
+          <td><b>規則設定</b></td>
+          <td>很少，改規則時</td>
+          <td>停損停利 %、停損基準、我的目標、規則變更紀錄</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>訊號的意思</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>訊號</th><th>意思</th></tr></thead>
+      <tbody>
+        <tr><td>🔴 觸發停損</td><td>收盤跌破你設定的停損線，規則判定該出場</td></tr>
+        <tr><td>🟢 觸發停利</td><td>收盤漲過停利線，規則判定該出場</td></tr>
+        <tr><td>🟠 接近停損</td><td>距停損線 3% 以內，預警</td></tr>
+        <tr><td>🔵 接近停利</td><td>距停利線 3% 以內，預警</td></tr>
+        <tr><td>⚪ 續抱</td><td>在區間內，沒事</td></tr>
+        <tr><td>⚓ 核心部位</td><td>長期持有（如大盤 ETF），不套用停損停利</td></tr>
+        <tr><td>❔ 無行情</td><td>當日查無報價（停牌或代號錯了）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="footnote">
+    <b>「距停損」怎麼看</b>：這是「現價還要再變動多少 % 才會碰到那條線」。<br>
+    <code>−14%</code> 代表還要再跌 14% 才停損（還有緩衝）；
+    轉為<b>正數</b>代表已經跌破了。
+  </p>
+</div>
+
+<div class="card">
+  <h2>常見問題</h2>
+
+  <details class="faq">
+    <summary>報價是即時的嗎？</summary>
+    <p>
+      不是。這是<b>收盤後</b>的資料。台股 13:30 收盤，資料源大約 14:00–15:00 更新，
+      所以系統排在 15:00 自動跑。<br>
+      這套系統的定位是<b>盤後決策</b>，不是當沖——盤中的即時報價請看你的券商 App。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>我改了停損 %，之前的紀錄會跟著變嗎？</summary>
+    <p>
+      不會。每天的訊號紀錄都會存下<b>當天用的參數</b>。
+      這樣兩個月後覆盤時，你才驗證得出自己有沒有在過程中偷偷把停損調鬆。<br>
+      沒有這份紀錄，你會拿到一份回頭看很合理、但什麼都證明不了的資料。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>「核心部位」是什麼？什麼時候該用？</summary>
+    <p>
+      標記為核心的部位<b>不會觸發停損停利訊號</b>。
+      適合你打定主意長期持有、不主動擇時的東西，例如追蹤大盤的 ETF。<br>
+      如果每次大盤回檔都被停損訊號打擾，你反而容易做出不該做的動作。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>資料會上傳到哪裡嗎？</summary>
+    <p>
+      不會。全部存在你自己的電腦上（專案的 <code>data/</code> 和 <code>config/</code> 資料夾）。
+      系統只對外連線做一件事：抓公開的收盤行情。<br>
+      要注意的是，如果你把專案推上 GitHub 而且是 public，
+      你的持股與成本就會公開——要推的話先把 repo 設成 private。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>停損設 8% 到底合不合理？</summary>
+    <p>
+      看標的。一檔日常波動 1% 的電信股和一檔波動 10% 的航運股，8% 的意義完全不同——
+      前者要跌很久才碰得到，後者不到一天的正常震盪就把你掃出場。<br>
+      「研究」頁會幫你換算：它會告訴你這檔的 8% 停損等於幾倍日常波動。
+      小於 1.5 倍就太緊了。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>模擬倉的績效可以相信嗎？</summary>
+    <p>
+      <b>少於 30～50 筆交易的統計沒有意義。</b>勝率 70% 但只有 6 筆，那是雜訊，
+      報告會在樣本不足時主動提醒你。<br>
+      另外請特別注意一個陷阱：<b>不要看到虧損就調鬆停損、看到獲利就調緊停利。</b>
+      那是最常見的自我欺騙路徑，你會得到一組在歷史上很漂亮、對未來毫無預測力的參數。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>畫面上的東西怎麼都不動？</summary>
+    <p>
+      行情一天只更新一次（收盤後）。如果日期停在好幾天前，通常是遇到假日，
+      或資料源還沒更新。按右上角的「更新報價」可以強制重抓。<br>
+      系統也有 30 分鐘的快取，避免重複打同一支免費 API。
+    </p>
+  </details>
+
+  <details class="faq">
+    <summary>它可以自動幫我下單嗎？</summary>
+    <p>
+      不行，而且目前<b>刻意</b>不做。<br>
+      現在最壞的情況是報告數字算錯；接上自動下單之後，最壞的情況是資金真的沒了。
+      要往那個方向走，正確的順序是先看幾個月模擬倉的績效——
+      如果一套規則在模擬倉都賺不到錢，接真錢只是賠得比較快。
+    </p>
+  </details>
+</div>
+
+<div class="card">
+  <h2>進階：終端機指令</h2>
+  <p class="footnote" style="margin-top:0">
+    上面所有事情都不需要碰終端機。以下只在你想手動做某件事時才用得到。
+  </p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>想做什麼</th><th>指令</th></tr></thead>
+      <tbody>
+        <tr><td>手動產生今天的報告</td><td><code>python3 src/main.py</code></td></tr>
+        <tr><td>補歷史資料（研究頁與模擬倉需要）</td><td><code>python3 src/history.py --months 12</code></td></tr>
+        <tr><td>看歷史資料累積到哪、有沒有缺</td><td><code>python3 src/history.py --status</code></td></tr>
+        <tr><td>補中間缺掉的月份</td><td><code>python3 src/history.py --fill-gaps</code></td></tr>
+        <tr><td>檢查資料源還正不正常</td><td><code>python3 src/history.py --self-test</code></td></tr>
+        <tr><td>回測：看這套規則過去會怎麼做</td><td><code>python3 src/backtest.py --verbose</code></td></tr>
+        <tr><td>查一個名詞</td><td><code>python3 src/research.py --term CoWoS</code></td></tr>
+        <tr><td>開／關每日自動更新</td><td><code>bash launch/install_daily.sh</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="footnote">
+    桌面上的「<b>投資工具箱</b>」把上面這些都做成選單了，不用記指令。
+  </p>
+</div>
+
+<div class="card">
+  <h2>免責</h2>
+  <p class="footnote" style="margin-top:0">
+    本工具依<b>你自己設定的規則</b>做計算與提醒，<b>不構成投資建議</b>。
+    所有下單決策由你本人負責。<br>
+    「研究」頁的產業背景是人工整理的靜態知識，<b>會過時</b>；
+    價格分析描述的是已經發生的走勢，不預測未來。<br>
+    模擬倉的績效是在假設條件下算出來的，<b>不是實際交易結果</b>，
+    也不保證同一套規則用真錢跑會得到相同結果。
+  </p>
+</div>
+
+{% endblock %}

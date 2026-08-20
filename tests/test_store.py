@@ -134,6 +134,65 @@ def main() -> int:
             [w["code"] for w in data["watchlist"]] == ["2454"],
         )
 
+        # --- 從空的持股清單開始（全新使用者的情境）---
+        # 專案預設出貨時 positions 是空的，因為新使用者多半還沒買任何股票，
+        # 不該一開始就在儀表板上看到一堆假數字。
+        # 但空清單是 ruamel round-trip 最容易出事的形狀，所以特別驗一次：
+        # 介面的「新增持股」要能從零開始，而且不能把檔案裡的中文註解洗掉。
+        empty_file = cfg / "empty.yaml"
+        empty_file.write_text(
+            "# 這段檔頭註解必須留著。\n"
+            "\n"
+            "positions: []\n"
+            "\n"
+            "# 觀察清單的區塊註解也要留著。\n"
+            "watchlist:\n"
+            "  - code: \"00919\"\n"
+            "    note: \"範例。\"\n",
+            encoding="utf-8",
+        )
+        store.POSITIONS_FILE = empty_file
+
+        store.add_position(
+            code="2330", shares=1000, cost=1980.0, entry_date="2026-06-20",
+            thesis="測試理由", invalidate="測試認錯條件", core=False,
+        )
+        data = pyyaml.safe_load(empty_file.read_text(encoding="utf-8"))
+        check("空清單能新增第一筆", len(data.get("positions") or []) == 1, str(data))
+        check(
+            "欄位寫入正確",
+            data["positions"][0]["code"] == "2330"
+            and data["positions"][0]["thesis"] == "測試理由",
+            str(data["positions"][0]),
+        )
+
+        store.add_position(
+            code="006208", shares=2000, cost=210.5, entry_date="2026-03-14",
+            thesis="核心部位", invalidate="不設停損", core=True,
+        )
+        data = pyyaml.safe_load(empty_file.read_text(encoding="utf-8"))
+        check("能繼續新增第二筆", len(data["positions"]) == 2)
+        check("core 旗標寫入正確", data["positions"][1].get("core") is True)
+
+        store.exit_position("2330", exit_date="2026-08-20", exit_price=2350.0)
+        data = pyyaml.safe_load(empty_file.read_text(encoding="utf-8"))
+        check(
+            "登記出場正常",
+            data["positions"][0].get("exit_price") == 2350.0,
+            str(data["positions"][0]),
+        )
+
+        text = empty_file.read_text(encoding="utf-8")
+        check("從空清單開始也不會洗掉檔頭註解", "這段檔頭註解必須留著" in text)
+        check("觀察清單的區塊註解也還在", "觀察清單的區塊註解也要留著" in text)
+        check(
+            "觀察清單沒有被持股的寫入影響",
+            [w["code"] for w in data["watchlist"]] == ["00919"],
+            str(data.get("watchlist")),
+        )
+
+        store.POSITIONS_FILE = positions
+
         # --- 備份 ---
         check(
             "每次寫入前都有備份",
