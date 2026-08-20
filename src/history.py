@@ -235,11 +235,23 @@ def rebuild_from_raw(codes: set[str] | None = None) -> dict[str, int]:
 #      3. 成交量的單位是**張**不是股 —— 要 ×1000 才能跟 TWSE 對齊
 
 
+def _squash(text: object) -> str:
+    """把欄位名稱裡的所有空白拿掉再比對。
+
+    這不是防禦性過頭 —— TPEx 實際回傳的日期欄位就叫「日 期」，中間有一個空格，
+    同一份回應裡其他欄位卻沒有。子字串比對會因此找不到日期欄，
+    然後整個月的資料靜靜地變成零根 K：不會拋例外、不會有錯誤訊息，
+    只會讓你的均線少了一段。全形空格（\u3000）同樣要清掉。
+    """
+    return "".join(str(text).split()).replace("\u3000", "")
+
+
 def _field_index(fields: list[str], *keywords: str) -> int | None:
-    """在 fields 裡找第一個包含任一關鍵字的欄位位置。"""
+    """在 fields 裡找第一個包含任一關鍵字的欄位位置（忽略空白）。"""
+    squashed_keywords = [_squash(kw) for kw in keywords]
     for idx, name in enumerate(fields):
-        text = str(name)
-        if any(kw in text for kw in keywords):
+        text = _squash(name)
+        if any(kw in text for kw in squashed_keywords):
             return idx
     return None
 
