@@ -169,6 +169,76 @@ try:
 
     # ======================================================================
     print()
+    print("--- TPEx tradingStock 解析（上櫃逐檔月報表）---")
+    # ======================================================================
+    # 這個格式跟 TWSE 有三處不同，每一處算錯都不會報錯、只會產生錯的均線：
+    #   資料在 tables[0] 裡、欄位沒有「價」字、成交量單位是張不是股。
+
+    tpex_payload = {
+        "tables": [
+            {
+                "fields": ["日期", "成交張數", "成交仟元", "開盤", "最高",
+                           "最低", "收盤", "漲跌", "筆數"],
+                "data": [
+                    ["115/07/01", "1,234", "620,000",
+                     "500.00", "510.00", "495.00", "505.00", "+5.00", "800"],
+                    ["115/07/02", "0", "0", "--", "--", "--", "--", "0.00", "0"],
+                ],
+            }
+        ]
+    }
+    tpex_bars = history.parse_trading_stock(tpex_payload)
+    check("從 tables[0] 裡取得資料", len(tpex_bars) == 1, str(tpex_bars))
+    check("日期轉為西元", tpex_bars and tpex_bars[0].date == "2026-07-01")
+    check(
+        "開高低收對應正確（欄位名稱沒有「價」字）",
+        tpex_bars and (tpex_bars[0].open, tpex_bars[0].high,
+                       tpex_bars[0].low, tpex_bars[0].close)
+        == (500.0, 510.0, 495.0, 505.0),
+        str(tpex_bars[0]) if tpex_bars else "",
+    )
+    check(
+        "成交張數 1,234 張 → 換算成 1,234,000 股（與 TWSE 單位對齊）",
+        tpex_bars and tpex_bars[0].volume == 1_234_000,
+        f"得到 {tpex_bars[0].volume if tpex_bars else None}",
+    )
+    check("無成交日被略過", len(tpex_bars) == 1)
+
+    # 若某天端點改成回傳「成交股數」，就不該再乘 1000
+    shares_payload = {
+        "tables": [
+            {
+                "fields": ["日期", "成交股數", "開盤", "最高", "最低", "收盤"],
+                "data": [["115/07/01", "1,234,000", "500.00", "510.00",
+                          "495.00", "505.00"]],
+            }
+        ]
+    }
+    shares_bars = history.parse_trading_stock(shares_payload)
+    check(
+        "欄位若是「成交股數」則不做張→股換算（避免多乘 1000 倍）",
+        shares_bars and shares_bars[0].volume == 1_234_000,
+        f"得到 {shares_bars[0].volume if shares_bars else None}",
+    )
+
+    check(
+        "資料直接放在頂層時也吃得下",
+        len(history.parse_trading_stock({
+            "fields": ["日期", "開盤", "最高", "最低", "收盤", "成交張數"],
+            "data": [["115/07/01", "500.00", "510.00", "495.00", "505.00", "10"]],
+        })) == 1,
+    )
+    check("空回應不會丟例外", history.parse_trading_stock({}) == [])
+    check("tables 是空的不會丟例外", history.parse_trading_stock({"tables": []}) == [])
+    check(
+        "欄位名稱全變 → 回傳空 list（明確失敗，不亂猜）",
+        history.parse_trading_stock(
+            {"tables": [{"fields": ["a", "b"], "data": [["1", "2"]]}]}
+        ) == [],
+    )
+
+    # ======================================================================
+    print()
     print("--- 從 data/raw/ 重建 ---")
     # ======================================================================
 

@@ -206,3 +206,90 @@ th.num, td.num { text-align: right; }
 
 .empty-note { color: var(--text-dim); font-size: 14px; padding: 6px 0; }
 .footnote { color: var(--text-dim); font-size: 12.5px; margin-top: 10px; line-height: 1.7; }
+
+/* ---------- 研究頁 ---------- */
+/* 三個區塊的視覺層級刻意不同：
+   算出來的事實用實線、背景知識用灰底、要自己查的用左邊色條，
+   讓人一眼就分得出哪些能信、哪些會過期、哪些系統根本不知道。 */
+
+.research-shape {
+  margin: 10px 0 6px;
+  padding-left: 20px;
+  line-height: 1.75;
+}
+.research-shape li { margin-bottom: 6px; }
+
+.research-facts {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  background: rgba(127, 127, 127, .07);
+  border-radius: 8px;
+}
+.research-facts dt {
+  font-weight: 600;
+  font-size: .86rem;
+  opacity: .72;
+  margin-top: 10px;
+}
+.research-facts dt:first-child { margin-top: 0; }
+.research-facts dd {
+  margin: 3px 0 0;
+  line-height: 1.7;
+}
+.research-facts dd ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+
+.research-questions {
+  margin: 8px 0 12px;
+  padding: 10px 14px 10px 30px;
+  border-left: 3px solid #d08a3e;
+  background: rgba(208, 138, 62, .07);
+  line-height: 1.75;
+}
+.research-questions li { margin-bottom: 7px; }
+
+.research-terms { margin-top: 12px; }
+.research-terms summary,
+.term-categories summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.term {
+  padding: 10px 0;
+  border-top: 1px solid rgba(127, 127, 127, .18);
+}
+.term:first-of-type { border-top: none; }
+.term-one-liner { margin-top: 4px; line-height: 1.7; }
+.term-detail {
+  margin-top: 5px;
+  line-height: 1.7;
+  opacity: .82;
+  font-size: .93rem;
+}
+.term-why {
+  margin-top: 5px;
+  line-height: 1.7;
+  font-size: .93rem;
+  opacity: .9;
+}
+
+.term-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.term-search input {
+  flex: 1;
+  max-width: 380px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(127, 127, 127, .35);
+  background: transparent;
+  color: inherit;
+  font-size: .95rem;
+}
+.term-categories details { margin-bottom: 4px; }

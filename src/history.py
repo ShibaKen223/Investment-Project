@@ -39,6 +39,7 @@ HISTORY_DIR = ROOT / "data" / "history"
 RAW_DIR = ROOT / "data" / "raw"
 
 TWSE_STOCK_DAY = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
+TPEX_TRADING_STOCK = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
 TIMEOUT = 30
 RETRIES = 3
 # TWSE 對逐檔查詢有流量限制，連續抓多個月份時每次之間要停一下。
@@ -223,10 +224,15 @@ def rebuild_from_raw(codes: set[str] | None = None) -> dict[str, int]:
 # --------------------------------------------------------------------------
 # 來源 2：TWSE 逐檔月報表
 # --------------------------------------------------------------------------
-# ⚠️ 這支端點是「網頁後端 API」，不是 openapi.twse.com.tw 那種正式開放資料，
-#    TWSE 改版時路徑或欄位名稱可能變動。解析刻意用「欄位名稱比對」而不是
-#    寫死索引，就是為了讓改版時比較不容易靜靜地解析錯位。
+# ⚠️ 這兩支端點都是「網頁後端 API」，不是 openapi.twse.com.tw 那種正式開放資料，
+#    改版時路徑或欄位名稱可能變動。解析刻意用「欄位名稱比對」而不是寫死索引，
+#    就是為了讓改版時比較不容易靜靜地解析錯位。
 #    如果哪天壞了，先用 --self-test 看它抓回來的 fields 長什麼樣子。
+#
+#    已知的回應格式差異（TPEx 有三個地方跟 TWSE 不一樣，每個都會靜靜地算錯）:
+#      1. 資料包在 tables[0]["data"] 裡，不是頂層的 "data"
+#      2. 欄位叫「開盤/最高/最低/收盤」，沒有「價」字
+#      3. 成交量的單位是**張**不是股 —— 要 ×1000 才能跟 TWSE 對齊
 
 
 def _field_index(fields: list[str], *keywords: str) -> int | None:
@@ -277,6 +283,84 @@ def parse_stock_day(payload: dict) -> list[Bar]:
     return bars
 
 
+def parse_trading_stock(payload: dict) -> list[Bar]:
+    """解析 TPEx tradingStock 的回應（上櫃逐檔月報表）。
+
+    跟 TWSE 最大的差別是資料藏在 tables[0] 裡，而且成交量以「張」計價。
+    """
+    if not isinstance(payload, dict):
+        return []
+
+    tables = payload.get("tables")
+    block: dict = {}
+    if isinstance(tables, list) and tables and isinstance(tables[0], dict):
+        block = tables[0]
+    elif payload.get("data"):
+        block = payload  # 少數情況直接放在頂層
+
+    fields = block.get("fields") or []
+    rows = block.get("data") or []
+    if not fields or not rows:
+        return []
+
+    idx_date = _field_index(fields, "日期")
+    idx_open = _field_index(fields, "開盤")
+    idx_high = _field_index(fields, "最高")
+    idx_low = _field_index(fields, "最低")
+    idx_close = _field_index(fields, "收盤")
+    # 「成交張數」是張，「成交股數」是股——兩種都要能吃，單位換算才會對。
+    idx_lots = _field_index(fields, "成交張數")
+    idx_shares = _field_index(fields, "成交股數")
+    if None in (idx_date, idx_open, idx_high, idx_low, idx_close):
+        return []
+
+    bars: list[Bar] = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) <= idx_close:
+            continue
+        iso = _roc_to_iso(row[idx_date])
+        o = _num(row[idx_open])
+        h = _num(row[idx_high])
+        low = _num(row[idx_low])
+        c = _num(row[idx_close])
+        if iso is None or None in (o, h, low, c):
+            continue
+
+        volume = 0.0
+        if idx_shares is not None and len(row) > idx_shares:
+            volume = _num(row[idx_shares]) or 0.0
+        elif idx_lots is not None and len(row) > idx_lots:
+            volume = (_num(row[idx_lots]) or 0.0) * 1000  # 張 → 股
+
+        bar = Bar(date=iso, open=o, high=h, low=low, close=c, volume=int(volume))
+        if bar.is_valid:
+            bars.append(bar)
+    return bars
+
+
+def fetch_tpex_month(code: str, year: int, month: int) -> list[Bar]:
+    """抓某檔某個月的日 K（上櫃股票）。"""
+    params = {
+        "code": code,
+        "date": f"{year:04d}/{month:02d}/01",
+        "id": "",
+        "response": "json",
+    }
+    last_error: Exception | None = None
+    for attempt in range(1, RETRIES + 1):
+        try:
+            resp = requests.get(TPEX_TRADING_STOCK, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return parse_trading_stock(resp.json())
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < RETRIES:
+                time.sleep(POLITE_DELAY)
+    raise RuntimeError(
+        f"抓取失敗 {code} {year}-{month:02d}（上櫃，{RETRIES} 次重試）"
+    ) from last_error
+
+
 def fetch_twse_month(code: str, year: int, month: int) -> list[Bar]:
     """抓某檔某個月的日 K（上市股票）。"""
     params = {
@@ -312,13 +396,34 @@ def _month_sequence(months: int, today: date | None = None) -> list[tuple[int, i
     return list(reversed(seq))
 
 
-def backfill(code: str, months: int = 12, today: date | None = None) -> int:
-    """補齊某檔最近 N 個月的日 K，回傳總筆數。"""
-    all_bars: list[Bar] = []
-    for year, month in _month_sequence(months, today):
-        all_bars.extend(fetch_twse_month(code, year, month))
-        time.sleep(POLITE_DELAY)
-    return save_bars(code, all_bars)
+def backfill(
+    code: str,
+    months: int = 12,
+    today: date | None = None,
+    market: str = "auto",
+) -> tuple[int, str]:
+    """補齊某檔最近 N 個月的日 K，回傳 (總筆數, 實際用的市場)。
+
+    market="auto" 會先試上市，一根 K 都拿不到就改試上櫃——
+    因為代號本身看不出它在哪個市場掛牌。
+    """
+    def _pull(fetch) -> list[Bar]:
+        bars: list[Bar] = []
+        for year, month in _month_sequence(months, today):
+            bars.extend(fetch(code, year, month))
+            time.sleep(POLITE_DELAY)
+        return bars
+
+    if market == "tpex":
+        return save_bars(code, _pull(fetch_tpex_month)), "上櫃"
+    if market == "twse":
+        return save_bars(code, _pull(fetch_twse_month)), "上市"
+
+    bars = _pull(fetch_twse_month)
+    if bars:
+        return save_bars(code, bars), "上市"
+    bars = _pull(fetch_tpex_month)
+    return save_bars(code, bars), "上櫃" if bars else "查無資料"
 
 
 # --------------------------------------------------------------------------
@@ -348,7 +453,7 @@ def universe_from_config() -> list[str]:
     return codes
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="歷史日 K 管理。預設對象是持股 + 觀察清單。"
     )
@@ -368,6 +473,12 @@ def main() -> None:
         "--status", action="store_true", help="只顯示目前每檔的資料涵蓋範圍"
     )
     parser.add_argument(
+        "--market",
+        choices=["auto", "twse", "tpex"],
+        default="auto",
+        help="指定市場。預設 auto：先試上市，抓不到再試上櫃",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         help="抓一個月的 2330 並印出原始欄位，用來確認端點格式沒改版",
@@ -381,21 +492,59 @@ def main() -> None:
     )
 
     if args.self_test:
-        resp = requests.get(
-            TWSE_STOCK_DAY,
-            params={"date": "20260701", "stockNo": "2330", "response": "json"},
-            timeout=TIMEOUT,
-        )
-        payload = resp.json()
-        print(f"HTTP {resp.status_code}  stat={payload.get('stat')!r}")
-        print(f"fields = {payload.get('fields')}")
-        rows = payload.get("data") or []
-        print(f"共 {len(rows)} 列，第一列: {rows[0] if rows else '（無）'}")
-        parsed = parse_stock_day(payload)
-        print(f"解析出 {len(parsed)} 根 K；第一根: {parsed[0] if parsed else '（無）'}")
-        if not parsed and rows:
-            print("⚠️  端點有回應但解析不出來，欄位名稱可能已改版。")
-        return
+        ok = True
+        today = date.today()
+        probe = f"{today.year:04d}{today.month:02d}01"
+
+        print("=== 上市 TWSE STOCK_DAY（2330）===")
+        try:
+            resp = requests.get(
+                TWSE_STOCK_DAY,
+                params={"date": probe, "stockNo": "2330", "response": "json"},
+                timeout=TIMEOUT,
+            )
+            payload = resp.json()
+            print(f"HTTP {resp.status_code}  stat={payload.get('stat')!r}")
+            print(f"fields = {payload.get('fields')}")
+            parsed = parse_stock_day(payload)
+            print(f"解析出 {len(parsed)} 根 K；第一根: {parsed[0] if parsed else '（無）'}")
+            if not parsed:
+                ok = False
+                print("⚠️  解析不出來，欄位名稱可能已改版。把上面的 fields 貼出來就能修。")
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            print(f"❌ 失敗：{exc}")
+
+        print()
+        print("=== 上櫃 TPEx tradingStock（6488）===")
+        try:
+            resp = requests.get(
+                TPEX_TRADING_STOCK,
+                params={
+                    "code": "6488",
+                    "date": f"{today.year:04d}/{today.month:02d}/01",
+                    "id": "",
+                    "response": "json",
+                },
+                timeout=TIMEOUT,
+            )
+            payload = resp.json()
+            tables = payload.get("tables") or []
+            block = tables[0] if tables and isinstance(tables[0], dict) else payload
+            print(f"HTTP {resp.status_code}")
+            print(f"fields = {block.get('fields')}")
+            parsed = parse_trading_stock(payload)
+            print(f"解析出 {len(parsed)} 根 K；第一根: {parsed[0] if parsed else '（無）'}")
+            if not parsed:
+                ok = False
+                print("⚠️  解析不出來。TPEx 端點改版較頻繁，把 fields 貼出來就能修。")
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            print(f"❌ 失敗：{exc}")
+
+        print()
+        print("✅ 兩個市場都正常。" if ok else "⚠️ 有市場抓不到，見上面的訊息。")
+        return 0 if ok else 1
 
     if args.status:
         if not codes:
@@ -407,7 +556,7 @@ def main() -> None:
             else:
                 start, end, count = info
                 print(f"{code}: {start} ~ {end}  共 {count} 根")
-        return
+        return 0
 
     if not codes:
         raise SystemExit("沒有要處理的代號，請用 --codes 指定。")
@@ -418,16 +567,25 @@ def main() -> None:
             print("data/raw/ 裡沒有可用的存檔。系統每天跑過之後這裡才會累積資料。")
         for code, count in sorted(result.items()):
             print(f"{code}: {count} 根（從 data/raw/ 重建）")
-        return
+        return 0
 
-    print(f"從 TWSE 補 {len(codes)} 檔 × {args.months} 個月，每次請求間隔 {POLITE_DELAY}s…")
+    print(
+        f"補 {len(codes)} 檔 × {args.months} 個月，每次請求間隔 {POLITE_DELAY}s。"
+        f"預估最少 {len(codes) * args.months * POLITE_DELAY / 60:.0f} 分鐘，"
+        f"跑的時候可以先去做別的事。"
+    )
     for code in codes:
         try:
-            count = backfill(code, args.months)
-            print(f"{code}: {count} 根")
+            count, market = backfill(code, args.months, market=args.market)
+            if count:
+                print(f"{code}: {count} 根（{market}）")
+            else:
+                print(f"{code}: 查無資料 —— 代號可能有誤，或這檔不在上市／上櫃")
         except RuntimeError as exc:
             print(f"{code}: 失敗 —— {exc}")
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

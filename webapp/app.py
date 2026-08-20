@@ -24,6 +24,7 @@ from flask import (  # noqa: E402
     url_for,
 )
 
+import research as research_mod  # noqa: E402
 import store  # noqa: E402
 from portfolio import (  # noqa: E402
     Evaluation,
@@ -409,6 +410,39 @@ def history():
         "history.html",
         reports=[p.stem for p in reports],
         journal=store.load_journal()[::-1][:100],
+    )
+
+
+@app.route("/research")
+def research():
+    """研究筆記：價格算出來的事實 + 產業背景 + 名詞辭典。
+
+    刻意跟「今日」分開：那頁是「今天要不要動作」，
+    這頁是「我到底買了什麼、現在在發生什麼」——兩種完全不同的閱讀節奏。
+    """
+    import history as history_mod
+
+    codes = history_mod.universe_from_config()
+    view = research_mod.build_view(codes)
+
+    glossary = research_mod.load_glossary()
+    query = (request.args.get("q") or "").strip()
+    term_hits = [
+        {"key": k, **item} for k, item in research_mod.search_terms(query, glossary)
+    ] if query else []
+
+    categories: dict[str, list[dict]] = {}
+    for key, item in glossary.items():
+        categories.setdefault(item.get("category", "其他"), []).append(
+            {"key": key, **item}
+        )
+
+    return render_template(
+        "research.html",
+        query=query,
+        term_hits=term_hits,
+        categories=categories,
+        **view,
     )
 
 

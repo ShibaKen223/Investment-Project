@@ -15,6 +15,8 @@
     <nav>
       <a href="{{ url_for('dashboard') }}"
          class="{{ 'active' if request.endpoint == 'dashboard' }}">今日</a>
+      <a href="{{ url_for('research') }}"
+         class="{{ 'active' if request.endpoint == 'research' }}">研究</a>
       <a href="{{ url_for('history') }}"
          class="{{ 'active' if request.endpoint == 'history' }}">歷史</a>
       <a href="{{ url_for('settings') }}"
