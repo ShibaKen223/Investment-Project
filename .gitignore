@@ -7,6 +7,11 @@ venv/
 # 原始行情快取檔案很大，可以重抓，不必進版控
 data/raw/
 
+# 歷史日 K 是衍生資料，隨時能用 src/history.py 重建，不必進版控。
+# 注意：模擬倉的成交與淨值紀錄（data/paper_*.jsonl）「要」進版控，
+# 理由跟 signals.jsonl 一樣——那是你之後驗證這套規則的證據。
+data/history/
+
 # 報告與訊號紀錄「要」進版控 —— 那是你的覆盤證據。
 # 如果不想公開持股，改成把整個 repo 設為 private，
 # 不要用 .gitignore 把 data/reports/ 和 data/signals.jsonl 排除掉。

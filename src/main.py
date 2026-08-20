@@ -10,6 +10,8 @@
     3. 算損益、停損停利距離、產生訊號
     4. 寫 Markdown 報告到 data/reports/YYYY-MM-DD.md
     5. append 一行結構化紀錄到 data/signals.jsonl（永不改寫，覆盤用）
+    6. 跑模擬倉（config/paper.yaml 的 enabled: true 時）：
+       用今日開盤成交昨日委託、用今日收盤產生明日委託，全程虛擬不下真單
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 import datasource  # noqa: E402
+import paperdaily  # noqa: E402
 import report as report_mod  # noqa: E402
 from portfolio import (  # noqa: E402
     Evaluation,
@@ -142,6 +145,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="只印出，不寫檔")
     parser.add_argument("--quiet", action="store_true", help="不印到終端機")
     parser.add_argument("--no-email", action="store_true", help="不寄送通知信")
+    parser.add_argument(
+        "--no-paper", action="store_true", help="跳過模擬倉（只做持股監控）"
+    )
     args = parser.parse_args()
 
     generated_at = datetime.now()
@@ -202,6 +208,14 @@ def main() -> int:
         for entry in watchlist_cfg
     ]
 
+    # 模擬倉：完全獨立於上面的持股監控，出錯也不該讓日報產不出來。
+    paper_data = None
+    if not args.no_paper:
+        try:
+            paper_data = paperdaily.run_daily(trade_date, quotes, args.dry_run)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"模擬倉執行失敗（不影響持股監控）：{exc}")
+
     markdown = report_mod.build_report(
         trade_date=trade_date,
         generated_at=generated_at,
@@ -210,6 +224,7 @@ def main() -> int:
         summary=summary,
         watchlist=watchlist,
         warnings=warnings,
+        paper_data=paper_data,
     )
 
     if not args.quiet:
@@ -232,6 +247,8 @@ def main() -> int:
     if not args.quiet:
         print(f"\n報告已寫入：{report_path}", file=sys.stderr)
         print(f"訊號紀錄已附加：{SIGNAL_LOG}", file=sys.stderr)
+        if paper_data and "result" in paper_data:
+            print(f"模擬倉淨值：{paper_data['result'].equity:,.0f}", file=sys.stderr)
 
     # 有觸發訊號才寄信；未設定 config/mail.yaml 就安靜略過
     if not args.no_email:

@@ -1,0 +1,96 @@
+#!/bin/bash
+# 投資工具箱 —— 雙擊後跳出選單，不用記任何指令。
+#
+# 設計原則：短工作（開儀表板）直接做完；
+# 長工作（補歷史、回測）開一個終端機視窗跑，讓你看得到進度，
+# 而不是視窗一閃就沒了、你不知道它到底在幹嘛。
+
+set -u
+
+# 用實體路徑解析：經由桌面捷徑（符號連結）啟動時，
+# 邏輯路徑的 ".." 會走到捷徑所在的資料夾而不是專案。
+ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && cd ../../../.. && pwd -P)"
+cd "$ROOT" || exit 1
+
+PY="$(command -v python3 || echo /usr/bin/python3)"
+URL="http://127.0.0.1:5173/"
+
+alert() {
+  osascript -e "display alert \"投資工具箱\" message \"$1\"" >/dev/null 2>&1
+}
+
+# 在新的終端機視窗執行，讓使用者看得到輸出與進度
+run_in_terminal() {
+  local title="$1" cmd="$2"
+  osascript >/dev/null 2>&1 <<APPLESCRIPT
+tell application "Terminal"
+  activate
+  do script "cd '$ROOT' && clear && echo '── $title ──' && echo '' && $cmd; echo ''; echo '── 完成，可以關掉這個視窗 ──'"
+end tell
+APPLESCRIPT
+}
+
+open_dashboard() {
+  if curl -s -o /dev/null --max-time 2 "$URL"; then
+    open "$URL"
+    return
+  fi
+  mkdir -p data
+  echo "--- $(date '+%Y-%m-%d %H:%M:%S') 啟動 ---" >> "$ROOT/data/app.log"
+  nohup "$PY" webapp/app.py >> "$ROOT/data/app.log" 2>&1 &
+  for _ in $(seq 1 60); do
+    curl -s -o /dev/null --max-time 2 "$URL" && return
+    sleep 0.25
+  done
+  alert "儀表板啟動失敗。請查看 data/app.log。常見原因是套件沒裝，可執行『安裝與設定』。"
+}
+
+CHOICE=$(osascript <<'APPLESCRIPT'
+set options to {¬
+  "📊 開啟儀表板", ¬
+  "🔄 更新今日行情與報告", ¬
+  "📖 產生研究筆記（存成檔案）", ¬
+  "📥 補歷史日 K（第一次要跑，很久）", ¬
+  "🧪 跑回測", ¬
+  "🩺 檢查資料源是否正常", ¬
+  "⏰ 安裝每日自動更新", ¬
+  "⏰ 移除每日自動更新", ¬
+  "🔧 安裝與設定（安裝套件）"}
+set picked to choose from list options ¬
+  with title "投資工具箱" ¬
+  with prompt "要做什麼？" ¬
+  default items {"📊 開啟儀表板"} ¬
+  OK button name "執行" cancel button name "取消"
+if picked is false then
+  return "CANCELLED"
+else
+  return item 1 of picked
+end if
+APPLESCRIPT
+)
+
+case "$CHOICE" in
+  CANCELLED|"")
+    exit 0 ;;
+  "📊 開啟儀表板")
+    open_dashboard ;;
+  "🔄 更新今日行情與報告")
+    run_in_terminal "更新今日行情與報告" "'$PY' src/main.py" ;;
+  "📖 產生研究筆記（存成檔案）")
+    run_in_terminal "產生研究筆記" "'$PY' src/research.py --save" ;;
+  "📥 補歷史日 K（第一次要跑，很久）")
+    run_in_terminal "補歷史日 K" \
+      "echo '每檔每月一次請求、間隔 3 秒，請耐心等。中途可以按 Ctrl+C 停下，已抓到的不會消失。' && echo '' && '$PY' src/history.py --months 24 && echo '' && '$PY' src/history.py --status" ;;
+  "🧪 跑回測")
+    run_in_terminal "回測" "'$PY' src/backtest.py" ;;
+  "🩺 檢查資料源是否正常")
+    run_in_terminal "檢查資料源" "'$PY' src/history.py --self-test" ;;
+  "⏰ 安裝每日自動更新")
+    run_in_terminal "安裝每日排程" "bash launch/install_daily.sh && echo '' && bash launch/install_daily.sh --status" ;;
+  "⏰ 移除每日自動更新")
+    run_in_terminal "移除每日排程" "bash launch/install_daily.sh --uninstall" ;;
+  "🔧 安裝與設定（安裝套件）")
+    run_in_terminal "安裝套件" "'$PY' -m pip install -r requirements.txt" ;;
+  *)
+    alert "未知的選項：$CHOICE" ;;
+esac

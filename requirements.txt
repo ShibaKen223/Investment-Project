@@ -1,2 +1,10 @@
+# 行情抓取與設定檔讀取
 requests>=2.31
 PyYAML>=6.0
+
+# 儀表板（webapp/app.py）
+flask>=3.0
+
+# 設定檔 round-trip 寫入（src/store.py）
+# 用它而不是 PyYAML，是因為從介面改持股時要保留 YAML 裡的中文註解。
+ruamel.yaml>=0.18
