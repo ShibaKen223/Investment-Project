@@ -20,7 +20,7 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
-from datetime import date, timedelta
+from datetime import date as _date, timedelta as _timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -43,13 +43,13 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 def bars_from(closes: list[float], volumes: list[int] | None = None) -> list[Bar]:
     """依收盤價造 K 棒，日期是連續工作日。"""
     out: list[Bar] = []
-    day = date(2025, 1, 6)
+    day = _date(2025, 1, 6)
     for i, close in enumerate(closes):
         while day.weekday() >= 5:
-            day += timedelta(days=1)
+            day += _timedelta(days=1)
         vol = volumes[i] if volumes else 1_000_000
         out.append(Bar(day.isoformat(), close, close, close, close, vol))
-        day += timedelta(days=1)
+        day += _timedelta(days=1)
     return out
 
 
@@ -68,20 +68,47 @@ try:
 
     check("最新收盤取最後一根", facts.close == 400.0, str(facts.close))
     check("K 棒數正確", facts.bars == 301)
+    # 報酬用「日曆天」而不是「往回數幾根 K」。
+    # 往回數根數只要中間有缺資料就會標錯期間——實測可以把一年算成 648 天。
+    def _ret_from(days: int) -> float:
+        """手算：找出 days 天前那根 K，算到最後一根的報酬。"""
+        last_date = _date.fromisoformat(ramp[-1].date)
+        target = (last_date - _timedelta(days=days)).isoformat()
+        past = [b for b in ramp if b.date <= target][-1]
+        return (ramp[-1].close / past.close - 1) * 100
+
     check(
-        "1 週報酬 = 5 個交易日前到現在（395 → 400 = +1.27%）",
-        abs(facts.returns["1 週"] - (400 / 395 - 1) * 100) < 1e-9,
-        str(facts.returns["1 週"]),
+        "1 週報酬用 7 個日曆天",
+        abs(facts.returns["1 週"] - _ret_from(7)) < 1e-9,
+        f"得到 {facts.returns['1 週']}，手算 {_ret_from(7)}",
     )
     check(
-        "1 個月報酬用 20 個交易日",
-        abs(facts.returns["1 個月"] - (400 / 380 - 1) * 100) < 1e-9,
-        str(facts.returns["1 個月"]),
+        "1 個月報酬用 30 個日曆天",
+        abs(facts.returns["1 個月"] - _ret_from(30)) < 1e-9,
+        f"得到 {facts.returns['1 個月']}，手算 {_ret_from(30)}",
     )
     check(
-        "1 年報酬用 250 個交易日",
-        abs(facts.returns["1 年"] - (400 / 150 - 1) * 100) < 1e-9,
-        str(facts.returns["1 年"]),
+        "1 年報酬用 365 個日曆天",
+        abs(facts.returns["1 年"] - _ret_from(365)) < 1e-9,
+        f"得到 {facts.returns['1 年']}，手算 {_ret_from(365)}",
+    )
+
+    # 有破洞時寧可顯示「—」，也不要給一個標錯期間的數字
+    holed = bars_from([100.0] * 30)            # 一個月左右
+    old_chunk = [
+        Bar(f"2023-01-{d:02d}", 50.0, 50.0, 50.0, 50.0, 1000)
+        for d in range(1, 21)
+    ]
+    holed_facts = research.compute_facts("HOLED", old_chunk + holed)
+    check(
+        "資料中間有兩年的洞 → 1 年報酬回傳 None，不硬算",
+        holed_facts.returns["1 年"] is None,
+        str(holed_facts.returns["1 年"]),
+    )
+    check(
+        "破洞月份數有被算出來",
+        holed_facts.gap_months > 0,
+        str(holed_facts.gap_months),
     )
 
     short = research.compute_facts("SHORT", bars_from([100.0, 101.0, 102.0]))
@@ -98,12 +125,21 @@ try:
     print("--- 一年區間位置 ---")
     # ======================================================================
 
+    # 一年區間同樣用日曆天切
+    _year_cut = (
+        _date.fromisoformat(ramp[-1].date) - _timedelta(days=365)
+    ).isoformat()
+    _year_bars = [b for b in ramp if b.date >= _year_cut]
     check(
-        "一年高點 = 最近 250 根的最高價",
-        facts.high_52w == 400.0,
-        str(facts.high_52w),
+        "一年高點 = 最近 365 個日曆天內的最高價",
+        facts.high_52w == max(b.high for b in _year_bars),
+        f"得到 {facts.high_52w}",
     )
-    check("一年低點 = 最近 250 根的最低價", facts.low_52w == 151.0, str(facts.low_52w))
+    check(
+        "一年低點 = 最近 365 個日曆天內的最低價",
+        facts.low_52w == min(b.low for b in _year_bars),
+        f"得到 {facts.low_52w}",
+    )
     check(
         "一路創新高 → 區間位置 100%",
         abs(facts.range_position - 100.0) < 1e-9,

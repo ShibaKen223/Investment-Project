@@ -32,7 +32,7 @@ import argparse
 import math
 import sys
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -98,17 +98,49 @@ class Facts:
     atr14: float | None = None               # ATR(14)，單位是元
     atr_pct: float | None = None             # ATR 佔現價的百分比
     volume_ratio: float | None = None        # 近 5 日均量 / 近 60 日均量
+    gap_months: int = 0                      # 資料中間缺了幾個月
     above_ma20: bool | None = None
     above_ma60: bool | None = None
     rally_start: tuple[str, float] | None = None   # (起漲日, 至今漲幅%)
     relative_strength: float | None = None   # 近 3 個月報酬 − 大盤報酬
 
 
-def _ret(bars: list[Bar], days: int) -> float | None:
-    if len(bars) <= days:
+def _bar_on_or_before(bars: list[Bar], target: str) -> Bar | None:
+    """找出日期在 target 當天或之前、最接近的那一根 K。"""
+    found = None
+    for bar in bars:
+        if bar.date <= target:
+            found = bar
+        else:
+            break
+    return found
+
+
+def _ret(bars: list[Bar], calendar_days: int, tolerance: int = 45) -> float | None:
+    """N 個「日曆天」之前到現在的報酬。
+
+    刻意用日曆天而不是「往回數 N 根 K」。往回數根數看起來比較單純，
+    但只要資料中間有缺（抓到一半被中斷、停牌），
+    往回 250 根拿到的就不是一年前的價格——實測可以橫跨到 648 天，
+    而報告上仍然寫著「1 年報酬」。這種錯不會報錯，只會靜靜地騙你。
+
+    找不到夠舊的資料，或最接近的那根跟目標日期差超過 tolerance 天，
+    就回傳 None——寧可顯示「—」，也不要給一個標錯期間的數字。
+    """
+    if not bars:
         return None
-    past = bars[-1 - days].close
-    return (bars[-1].close / past - 1) * 100 if past > 0 else None
+    last = datetime.strptime(bars[-1].date, "%Y-%m-%d").date()
+    target = (last - timedelta(days=calendar_days)).isoformat()
+
+    past_bar = _bar_on_or_before(bars, target)
+    if past_bar is None or past_bar.date == bars[-1].date:
+        return None
+
+    past_date = datetime.strptime(past_bar.date, "%Y-%m-%d").date()
+    if (last - past_date).days - calendar_days > tolerance:
+        return None      # 最接近的資料離目標太遠，這個期間根本沒有資料
+
+    return (bars[-1].close / past_bar.close - 1) * 100 if past_bar.close > 0 else None
 
 
 def _volatility(bars: list[Bar], days: int = 60) -> float | None:
@@ -152,14 +184,19 @@ def compute_facts(code: str, bars: list[Bar], benchmark: list[Bar] | None = None
     )
 
     facts.returns = {
-        "1 週": _ret(bars, 5),
-        "1 個月": _ret(bars, 20),
-        "3 個月": _ret(bars, 60),
-        "半年": _ret(bars, 125),
-        "1 年": _ret(bars, TRADING_DAYS_YEAR),
+        "1 週": _ret(bars, 7, tolerance=7),
+        "1 個月": _ret(bars, 30, tolerance=14),
+        "3 個月": _ret(bars, 91, tolerance=21),
+        "半年": _ret(bars, 182, tolerance=30),
+        "1 年": _ret(bars, 365, tolerance=45),
     }
 
-    year = bars[-TRADING_DAYS_YEAR:]
+    # 一年區間同樣用日曆天切，不是「最後 250 根」
+    cutoff = (
+        datetime.strptime(bars[-1].date, "%Y-%m-%d").date() - timedelta(days=365)
+    ).isoformat()
+    year = [b for b in bars if b.date >= cutoff]
+    facts.gap_months = len(history.gaps_in(bars))
     if len(year) >= 20:
         facts.high_52w = max(b.high for b in year)
         facts.low_52w = min(b.low for b in year)
@@ -188,8 +225,8 @@ def compute_facts(code: str, bars: list[Bar], benchmark: list[Bar] | None = None
     facts.rally_start = _rally_start(bars)
 
     if benchmark:
-        own = _ret(bars, 60)
-        mkt = _ret(benchmark, 60)
+        own = _ret(bars, 91, tolerance=21)
+        mkt = _ret(benchmark, 91, tolerance=21)
         if own is not None and mkt is not None:
             facts.relative_strength = own - mkt
 
@@ -414,6 +451,14 @@ def build_stock_report(
         f"歷史資料 {facts.bars} 根 K*"
     )
     lines.append("")
+
+    if facts.gap_months:
+        lines.append(
+            f"> ⚠️ **這檔的歷史中間缺了 {facts.gap_months} 個月。** "
+            f"缺掉的期間算不出報酬，下表會顯示「—」而不是給你一個標錯期間的數字。"
+            f"補起來：`python3 src/history.py --fill-gaps`"
+        )
+        lines.append("")
 
     # ---------- 系統算出來的 ----------
     lines.append("### 【系統算出來的】價格在說什麼")
@@ -768,6 +813,7 @@ def build_view(codes: list[str]) -> dict:
                 "code": code,
                 "name": (entry or {}).get("name", ""),
                 "facts": facts,
+                "gap_months": facts.gap_months if facts else 0,
                 "entry": entry,
                 "note": note,
                 "shape": [

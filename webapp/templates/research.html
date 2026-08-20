@@ -40,6 +40,14 @@
         收盤 <b>{{ '%.2f'|format(f.close) }}</b>（{{ f.as_of }}）　·　歷史資料 {{ f.bars }} 根 K
       </div>
 
+      {% if item.gap_months %}
+        <div class="warn-box">
+          <b>這檔的歷史中間缺了 {{ item.gap_months }} 個月。</b>
+          缺掉的期間算不出報酬，下表會顯示「—」而不是給你一個標錯期間的數字。
+          在終端機執行 <code>python3 src/history.py --fill-gaps</code> 補起來。
+        </div>
+      {% endif %}
+
       {# ---------- 價格在說什麼 ---------- #}
       <h3>價格在說什麼</h3>
       <div class="table-scroll">

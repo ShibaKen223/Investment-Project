@@ -63,7 +63,10 @@ POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "1.2"))
 # 要蓋掉延遲，worker 數大約需要 延遲 ÷ 間隔。端點慢到每次 6 秒時，
 # 6 個 worker 才勉強跟得上 1.2 秒的發送節奏；worker 太少的話，
 # 瓶頸會從「發送頻率」變成「等回應」，那就白設限速器了。
-MAX_WORKERS = int(os.environ.get("INVEST_FETCH_WORKERS", "6"))
+#
+# 預設 3：實測 5～6 個併發會讓 TWSE 開始回 read-timeout（伺服器端限流），
+# 逾時再重試反而更慢，而且會留下殘缺的月份。寧可慢一點也不要製造破洞。
+MAX_WORKERS = int(os.environ.get("INVEST_FETCH_WORKERS", "3"))
 
 # 一個交易月最少有幾根 K 才算「這個月已經抓齊了」。
 # 農曆年的二月最少大約 13 個交易日，取這個數當門檻。
@@ -221,6 +224,57 @@ def available_codes() -> list[str]:
     return sorted(
         p.stem for p in HISTORY_DIR.glob("*.csv") if not p.name.startswith(".")
     )
+
+
+def _months_between(start: str, end: str) -> list[tuple[int, int]]:
+    """涵蓋 start 到 end 的所有 (年, 月)，含頭尾。"""
+    y, m = int(start[:4]), int(start[5:7])
+    end_y, end_m = int(end[:4]), int(end[5:7])
+    out: list[tuple[int, int]] = []
+    while (y, m) <= (end_y, end_m):
+        out.append((y, m))
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+    return out
+
+
+def gaps_in(bars: list[Bar]) -> list[tuple[int, int]]:
+    """從一串 K 棒找出中間缺掉的月份。
+
+    跟 find_gaps() 的差別只在資料來源：這支吃記憶體裡的資料，
+    讓已經把 bars 拿在手上的呼叫端不必再讀一次磁碟
+    （也才能對還沒存檔的資料做檢查）。
+    """
+    if len(bars) < 2:
+        return []
+
+    counts: dict[tuple[int, int], int] = {}
+    for bar in bars:
+        key = (int(bar.date[:4]), int(bar.date[5:7]))
+        counts[key] = counts.get(key, 0) + 1
+
+    # 頭尾兩個月本來就可能是部分月份（剛開始追蹤、當月還沒過完），
+    # 所以只檢查中間的月份。
+    interior = _months_between(bars[0].date, bars[-1].date)[1:-1]
+    return [ym for ym in interior if counts.get(ym, 0) < MIN_BARS_PER_MONTH]
+
+
+def find_gaps(code: str) -> list[tuple[int, int]]:
+    """找出某檔「已涵蓋範圍之內」缺資料的月份。
+
+    為什麼重要：months_needed() 只看你這次要求的區間，
+    更早的殘缺月份（例如上一輪抓到一半被中斷留下的）永遠不會被發現。
+    檔案看起來涵蓋兩年，中間卻是空的。
+
+    這種破洞不會報錯，但會讓「往回數 N 根」的指標算錯——
+    有洞的話，往回 250 根拿到的可能是兩年前的價格，
+    「一年報酬」就變成了兩年報酬，而報告上仍然寫著一年。
+
+    頭尾兩個月本來就可能是部分月份（剛開始追蹤、當月還沒過完），
+    所以只檢查中間的月份。
+    """
+    return gaps_in(load_bars(code))
 
 
 def coverage(code: str) -> tuple[str, str, int] | None:
@@ -592,15 +646,20 @@ def backfill(
     market: str = "auto",
     force: bool = False,
     progress=None,
+    only_months: list[tuple[int, int]] | None = None,
 ) -> tuple[int, str, int]:
     """補齊某檔最近 N 個月的日 K。
+
+    only_months 有給就只抓那些月份（補洞用），忽略 months 與 force。
 
     回傳 (資料總筆數, 實際用的市場, 這次連線抓了幾個月)。
 
     每抓完一個月就存檔，不是全部抓完才存——
     中途 Ctrl+C 或斷線時，已經抓到的不會消失，重跑會從缺的地方接下去。
     """
-    todo = months_needed(code, months, today, force)
+    todo = list(only_months) if only_months else months_needed(
+        code, months, today, force
+    )
     if not todo:
         bars = load_bars(code)
         return len(bars), "已是最新", 0
@@ -641,6 +700,7 @@ def backfill_many(
     force: bool = False,
     workers: int = MAX_WORKERS,
     progress=None,
+    plan: dict[str, list[tuple[int, int]]] | None = None,
 ) -> dict[str, tuple[int, str, int]]:
     """同時回補多檔。回傳 {代號: (總筆數, 市場, 這次抓了幾個月)}。
 
@@ -659,7 +719,10 @@ def backfill_many(
 
     def one(code: str) -> None:
         try:
-            outcome = backfill(code, months, today, market, force, progress)
+            outcome = backfill(
+                code, months, today, market, force, progress,
+                only_months=(plan or {}).get(code),
+            )
         except RuntimeError as exc:
             with lock:
                 results[code] = (len(load_bars(code)), f"失敗：{exc}", 0)
@@ -719,6 +782,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--status", action="store_true", help="只顯示目前每檔的資料涵蓋範圍"
+    )
+    parser.add_argument(
+        "--fill-gaps",
+        action="store_true",
+        help="只補「已涵蓋範圍之內」缺掉的月份（上次抓到一半留下的破洞）",
     )
     parser.add_argument(
         "--workers",
@@ -808,13 +876,70 @@ def main() -> int:
     if args.status:
         if not codes:
             codes = available_codes()
+        holed: list[str] = []
         for code in codes:
             info = coverage(code)
             if info is None:
                 print(f"{code}: （無資料）")
+                continue
+            start, end, count = info
+            gaps = find_gaps(code)
+            if gaps:
+                holed.append(code)
+                shown = "、".join(f"{y}-{m:02d}" for y, m in gaps[:6])
+                more = f" 等 {len(gaps)} 個月" if len(gaps) > 6 else ""
+                print(f"{code}: {start} ~ {end}  共 {count} 根  ⚠️ 缺 {shown}{more}")
             else:
-                start, end, count = info
                 print(f"{code}: {start} ~ {end}  共 {count} 根")
+        if holed:
+            print()
+            print("⚠️  上面標記的標的中間有缺月份。這不會報錯，但會讓指標算錯——")
+            print("    「往回數 250 根」拿到的可能是兩年前的價格，")
+            print("    報告上卻仍寫著「一年報酬」。")
+            print()
+            print("    補起來：python3 src/history.py --fill-gaps")
+        return 0
+
+    if args.fill_gaps:
+        if not codes:
+            codes = available_codes()
+        gap_plan = {c: find_gaps(c) for c in codes}
+        gap_plan = {c: v for c, v in gap_plan.items() if v}
+        if not gap_plan:
+            print("所有標的的歷史都是連續的，沒有破洞要補。")
+            return 0
+
+        total = sum(len(v) for v in gap_plan.values())
+        print(f"要補 {total} 個缺漏的月份（{len(gap_plan)} 檔）：")
+        for code, months_list in sorted(gap_plan.items()):
+            shown = "、".join(f"{y}-{m:02d}" for y, m in months_list[:6])
+            more = f" 等 {len(months_list)} 個月" if len(months_list) > 6 else ""
+            print(f"  {code}: {shown}{more}")
+        print()
+
+        started = time.monotonic()
+
+        def gap_progress(code, year, month, count, error):
+            if error:
+                print(f"  {code} {year}-{month:02d}  失敗：{error}", flush=True)
+            else:
+                print(f"  {code} {year}-{month:02d}  {count} 根", flush=True)
+
+        results = backfill_many(
+            list(gap_plan),
+            months=0,
+            market=args.market,
+            workers=max(1, min(args.workers, len(gap_plan))),
+            progress=gap_progress,
+            plan=gap_plan,
+        )
+        print()
+        for code in sorted(results):
+            left = find_gaps(code)
+            status = "已補齊" if not left else f"仍缺 {len(left)} 個月"
+            print(f"{code}: 共 {results[code][0]} 根（{status}）")
+        print()
+        print(f"總共花了 {(time.monotonic() - started) / 60:.1f} 分鐘。")
         return 0
 
     if not codes:

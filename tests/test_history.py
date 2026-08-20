@@ -299,6 +299,55 @@ try:
 
     # ======================================================================
     print()
+    print("--- 破洞偵測 ---")
+    # ======================================================================
+    # months_needed() 只看你這次要求的區間，更早的殘缺月份永遠不會被發現。
+    # 檔案看起來涵蓋兩年、中間卻是空的——這種破洞不會報錯，
+    # 但會讓「往回數 N 根」的指標算錯期間。
+
+    def month_bars(year: int, month: int, count: int = 20) -> list[Bar]:
+        return [bar(f"{year:04d}-{month:02d}-{day:02d}") for day in range(1, count + 1)]
+
+    continuous = month_bars(2026, 1) + month_bars(2026, 2) + month_bars(2026, 3)
+    check("連續的資料沒有破洞", history.gaps_in(continuous) == [])
+
+    # 真實情境：抓了 2024-09~11，中斷；後來只補了最近 12 個月
+    holed = (
+        month_bars(2024, 9) + month_bars(2024, 10) + month_bars(2024, 11)
+        + [b for m in range(9, 13) for b in month_bars(2025, m)]
+    )
+    detected = history.gaps_in(holed)
+    check(
+        "中間缺掉的月份被抓出來（2024-12 ~ 2025-08 共 9 個月）",
+        len(detected) == 9 and detected[0] == (2024, 12) and detected[-1] == (2025, 8),
+        str(detected),
+    )
+
+    check(
+        "頭尾的部分月份不算破洞（剛開始追蹤、當月還沒過完）",
+        history.gaps_in(
+            month_bars(2026, 1, count=3) + month_bars(2026, 2)
+            + month_bars(2026, 3, count=2)
+        ) == [],
+    )
+    check(
+        "中間只有零星幾根的月份算破洞",
+        history.gaps_in(
+            month_bars(2026, 1) + month_bars(2026, 2, count=3) + month_bars(2026, 3)
+        ) == [(2026, 2)],
+    )
+    check("資料太少不會誤判", history.gaps_in([]) == []
+          and history.gaps_in([bar("2026-01-05")]) == [])
+
+    history.save_bars("HOLED", holed)
+    check(
+        "find_gaps 從檔案讀出來的結果一致",
+        history.find_gaps("HOLED") == detected,
+        str(history.find_gaps("HOLED")),
+    )
+
+    # ======================================================================
+    print()
     print("--- 增量回補（決定哪些月份要連線）---")
     # ======================================================================
     # 過去的日 K 不會再變，重抓只是浪費時間。
