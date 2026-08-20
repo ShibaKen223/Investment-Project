@@ -17,6 +17,7 @@ import json
 import shutil
 import sys
 import tempfile
+from datetime import date as _date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -346,14 +347,71 @@ try:
         str(history.find_gaps("HOLED")),
     )
 
+    # --- 農曆年：短月份不該被誤判成破洞 ---
+    # 這裡曾經寫死「一個月至少 13 根才算完整」。
+    # 但 2026 年 2 月因為農曆年（2/12–2/20 休市）真的只有 12 個交易日，
+    # 結果每一檔都被永遠標成「缺 2026-02」，補了也不會消——
+    # 因為那個月本來就是完整的，沒有東西可以補。
+    # 改成從資料本身推導每個月的交易日數之後，這種誤判就不會發生。
+
+    cny_full = (
+        month_bars(2025, 12) + month_bars(2026, 1)
+        + month_bars(2026, 2, count=12)          # 農曆年，真的只有 12 天
+        + month_bars(2026, 3) + month_bars(2026, 4)
+    )
+    history.save_bars("CNY_A", cny_full)
+    history.save_bars("CNY_B", cny_full)         # 兩檔都 12 根 → 日曆認定就是 12 天
+
+    calendar = history.trading_calendar(["CNY_A", "CNY_B"])
+    check(
+        "交易日曆從資料推導出 2026-02 只有 12 個交易日",
+        calendar.get((2026, 2)) == 12,
+        str(calendar.get((2026, 2))),
+    )
+    check(
+        "農曆年的短月份不算破洞（不再永遠標記補不掉的洞）",
+        history.gaps_in(cny_full, calendar) == [],
+        str(history.gaps_in(cny_full, calendar)),
+    )
+
+    cny_missing = (
+        month_bars(2025, 12) + month_bars(2026, 1)
+        + month_bars(2026, 2, count=3)           # 這才是真的缺
+        + month_bars(2026, 3) + month_bars(2026, 4)
+    )
+    check(
+        "同一個月只有 3 根就是真的缺，照樣抓得到",
+        history.gaps_in(cny_missing, calendar) == [(2026, 2)],
+        str(history.gaps_in(cny_missing, calendar)),
+    )
+
+    history.save_bars("CNY_C", cny_full)
+    check(
+        "months_needed 不會反覆重抓已經完整的農曆年月份",
+        (2026, 2) not in history.months_needed(
+            "CNY_C", 5, today=_date(2026, 4, 30)
+        ),
+        str(history.months_needed("CNY_C", 5, today=_date(2026, 4, 30))),
+    )
+    check(
+        "但真的缺的月份仍然會被排進去重抓",
+        (2026, 2) in history.months_needed(
+            "CNY_MISSING", 5, today=_date(2026, 4, 30)
+        ) if history.save_bars("CNY_MISSING", cny_missing) else False,
+    )
+
+    check(
+        "只追蹤一檔、沒有可比對的資料時，用自己的中位數當基準",
+        history.gaps_in(cny_full, {}) == [],
+        str(history.gaps_in(cny_full, {})),
+    )
+
     # ======================================================================
     print()
     print("--- 增量回補（決定哪些月份要連線）---")
     # ======================================================================
     # 過去的日 K 不會再變，重抓只是浪費時間。
     # 這段邏輯讓第二次以後的執行從好幾分鐘縮短到幾秒。
-
-    from datetime import date as _date
 
     ref = _date(2026, 8, 20)
 

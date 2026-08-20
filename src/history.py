@@ -68,9 +68,23 @@ POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "1.2"))
 # 逾時再重試反而更慢，而且會留下殘缺的月份。寧可慢一點也不要製造破洞。
 MAX_WORKERS = int(os.environ.get("INVEST_FETCH_WORKERS", "3"))
 
-# 一個交易月最少有幾根 K 才算「這個月已經抓齊了」。
-# 農曆年的二月最少大約 13 個交易日，取這個數當門檻。
-MIN_BARS_PER_MONTH = 13
+# 一個月「抓齊了」的判斷，刻意不寫死根數。
+#
+# 寫死過一次，錯得很典型：門檻設 13，但 2026 年 2 月因為農曆年
+# （2/12–2/20 休市）真的只有 12 個交易日。結果每一檔都被永遠標成
+# 「缺 2026-02」，補了也不會消——因為那個月本來就是完整的。
+# 颱風假、補班日也會製造同樣的問題，維護一份假日表則是另一個坑。
+#
+# 改成從資料本身推導：所有追蹤標的中，某個月最多的那個根數，
+# 就是那個月真正的交易日數（只要有任何一檔抓齊了）。自我校準，
+# 不需要假日表，農曆年和颱風假都自動處理。
+#
+# 兩個比例分開用，因為兩件事的代價不對稱：
+COMPLETE_RATIO = 0.8   # 回補判斷「這個月夠完整了嗎」——寧可多抓一次
+GAP_RATIO = 0.5        # 對使用者報破洞——寧可漏報，也不要謊報永遠補不掉的洞
+
+# 完全沒有其他標的可以比對時（只追蹤一檔）的絕對下限。
+MIN_BARS_FALLBACK = 5
 # 最近幾個月一律重抓：當月還在累積，上個月也可能有補登。
 ALWAYS_REFRESH_MONTHS = 2
 
@@ -239,7 +253,56 @@ def _months_between(start: str, end: str) -> list[tuple[int, int]]:
     return out
 
 
-def gaps_in(bars: list[Bar]) -> list[tuple[int, int]]:
+def trading_calendar(codes: list[str] | None = None) -> dict[tuple[int, int], int]:
+    """每個月實際有幾個交易日，從已存的歷史資料推導出來。
+
+    取所有追蹤標的中該月的最大根數。某一檔可能停牌、可能抓漏，
+    但只要有任何一檔抓齊了，最大值就是那個月真正的交易日數。
+
+    這樣就不需要維護假日表：農曆年、颱風假、補班日全都自動反映在資料裡。
+    """
+    counts: dict[tuple[int, int], int] = {}
+    for code in codes if codes is not None else available_codes():
+        per_month: dict[tuple[int, int], int] = {}
+        for bar in load_bars(code):
+            key = (int(bar.date[:4]), int(bar.date[5:7]))
+            per_month[key] = per_month.get(key, 0) + 1
+        for key, value in per_month.items():
+            counts[key] = max(counts.get(key, 0), value)
+    return counts
+
+
+def _month_counts(bars: list[Bar]) -> dict[tuple[int, int], int]:
+    counts: dict[tuple[int, int], int] = {}
+    for bar in bars:
+        key = (int(bar.date[:4]), int(bar.date[5:7]))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _expected_for(
+    month: tuple[int, int],
+    calendar: dict[tuple[int, int], int],
+    own_counts: dict[tuple[int, int], int],
+) -> int:
+    """那個月應該要有幾根 K。
+
+    優先用跨標的推導出來的交易日曆；沒有可比對的資料時（例如只追蹤一檔），
+    退回用這一檔自己各月份的中位數當基準。
+    """
+    expected = calendar.get(month, 0)
+    if expected:
+        return expected
+    values = sorted(v for v in own_counts.values() if v > 0)
+    if not values:
+        return 0
+    return values[len(values) // 2]
+
+
+def gaps_in(
+    bars: list[Bar],
+    calendar: dict[tuple[int, int], int] | None = None,
+) -> list[tuple[int, int]]:
     """從一串 K 棒找出中間缺掉的月份。
 
     跟 find_gaps() 的差別只在資料來源：這支吃記憶體裡的資料，
@@ -249,15 +312,20 @@ def gaps_in(bars: list[Bar]) -> list[tuple[int, int]]:
     if len(bars) < 2:
         return []
 
-    counts: dict[tuple[int, int], int] = {}
-    for bar in bars:
-        key = (int(bar.date[:4]), int(bar.date[5:7]))
-        counts[key] = counts.get(key, 0) + 1
+    counts = _month_counts(bars)
+    calendar = calendar if calendar is not None else {}
 
     # 頭尾兩個月本來就可能是部分月份（剛開始追蹤、當月還沒過完），
     # 所以只檢查中間的月份。
     interior = _months_between(bars[0].date, bars[-1].date)[1:-1]
-    return [ym for ym in interior if counts.get(ym, 0) < MIN_BARS_PER_MONTH]
+
+    gaps: list[tuple[int, int]] = []
+    for month in interior:
+        expected = _expected_for(month, calendar, counts)
+        floor = max(expected * GAP_RATIO, MIN_BARS_FALLBACK) if expected else 0
+        if floor and counts.get(month, 0) < floor:
+            gaps.append(month)
+    return gaps
 
 
 def find_gaps(code: str) -> list[tuple[int, int]]:
@@ -274,7 +342,7 @@ def find_gaps(code: str) -> list[tuple[int, int]]:
     頭尾兩個月本來就可能是部分月份（剛開始追蹤、當月還沒過完），
     所以只檢查中間的月份。
     """
-    return gaps_in(load_bars(code))
+    return gaps_in(load_bars(code), trading_calendar())
 
 
 def coverage(code: str) -> tuple[str, str, int] | None:
@@ -606,18 +674,20 @@ def months_needed(
     if force:
         return sequence
 
-    counts: dict[str, int] = {}
-    for bar in load_bars(code):
-        key = bar.date[:7]
-        counts[key] = counts.get(key, 0) + 1
-
+    counts = _month_counts(load_bars(code))
+    calendar = trading_calendar()
     always = set(sequence[-ALWAYS_REFRESH_MONTHS:])
-    return [
-        (year, month)
-        for year, month in sequence
-        if (year, month) in always
-        or counts.get(f"{year:04d}-{month:02d}", 0) < MIN_BARS_PER_MONTH
-    ]
+
+    needed: list[tuple[int, int]] = []
+    for month in sequence:
+        if month in always:
+            needed.append(month)
+            continue
+        expected = _expected_for(month, calendar, counts)
+        # 完全不知道那個月該有幾根（第一次跑，什麼資料都沒有）就抓
+        if not expected or counts.get(month, 0) < expected * COMPLETE_RATIO:
+            needed.append(month)
+    return needed
 
 
 def detect_market(code: str, year: int, month: int) -> str:
