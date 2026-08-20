@@ -470,6 +470,88 @@ try:
 
     # ======================================================================
     print()
+    print("--- 併發寫入保護 ---")
+    # ======================================================================
+    # save_bars 是「讀出全部 → 合併 → 整個寫回」。沒有保護的話，
+    # 兩個行程各自讀到舊內容、各自合併、後寫的蓋掉先寫的 —— 資料就沒了。
+    # 修正前用同樣的情境實測，120 根只剩 60 根。
+    #
+    # 會撞到的不是理論情況：手動跑 history.py 回補時碰上 15:00 的每日排程
+    # （main.py 也會寫同一批檔案），或兩個回補行程並行，都會踩到。
+
+    import subprocess as _subprocess
+
+    race_dir = TMP / "race"
+    worker_src = TMP / "race_worker.py"
+    worker_src.write_text(
+        "import sys, pathlib\n"
+        f"sys.path.insert(0, {str(Path(__file__).resolve().parent.parent / 'src')!r})\n"
+        "import history\n"
+        "from history import Bar\n"
+        "history.HISTORY_DIR = pathlib.Path(sys.argv[1])\n"
+        "month = int(sys.argv[2])\n"
+        "for _ in range(6):\n"
+        "    history.save_bars('RACE', [\n"
+        "        Bar(f'2026-{month:02d}-{d:02d}', 100.0, 100.0, 100.0, 100.0, 1000)\n"
+        "        for d in range(1, 21)\n"
+        "    ])\n",
+        encoding="utf-8",
+    )
+
+    procs = [
+        _subprocess.Popen([sys.executable, str(worker_src), str(race_dir), str(month)])
+        for month in (1, 2, 3, 4)
+    ]
+    for proc in procs:
+        proc.wait(timeout=60)
+
+    saved_dir = history.HISTORY_DIR
+    history.HISTORY_DIR = race_dir
+    try:
+        race_bars = history.load_bars("RACE")
+        race_months = sorted({b.date[:7] for b in race_bars})
+        leftovers = [q.name for q in race_dir.glob("*.tmp")]
+        codes_seen = history.available_codes()
+    finally:
+        history.HISTORY_DIR = saved_dir
+
+    check(
+        "4 個行程同時寫同一個檔案，沒有任何一個月的資料被蓋掉",
+        len(race_bars) == 80,
+        f"得到 {len(race_bars)} 根（應為 80），涵蓋 {race_months}",
+    )
+    check(
+        "四個月份全部保留",
+        len(race_months) == 4,
+        str(race_months),
+    )
+    check(
+        "沒有殘留的暫存檔（原子寫入有收乾淨）",
+        not leftovers,
+        str(leftovers),
+    )
+    check(
+        "鎖檔不會被當成股票代號",
+        codes_seen == ["RACE"],
+        str(codes_seen),
+    )
+
+    # 原子性：任何時刻讀到的都是完整檔案，不會是寫到一半的狀態
+    history.HISTORY_DIR = race_dir
+    try:
+        before = len(history.load_bars("RACE"))
+        history.save_bars("RACE", [bar("2026-09-01")])
+        after = history.load_bars("RACE")
+        check(
+            "寫入後檔案立即可讀且完整（沒有截斷）",
+            len(after) == before + 1 and all(b.close > 0 for b in after),
+            f"{before} → {len(after)}",
+        )
+    finally:
+        history.HISTORY_DIR = saved_dir
+
+    # ======================================================================
+    print()
     print("--- 從 data/raw/ 重建 ---")
     # ======================================================================
 

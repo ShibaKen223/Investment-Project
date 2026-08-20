@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import json
 import os
@@ -99,6 +100,72 @@ class Bar:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# 併發保護
+# --------------------------------------------------------------------------
+# save_bars 是「讀出全部 → 合併 → 整個寫回」，沒有保護的話有兩種壞法:
+#
+#   1. 檔案被清空。open("w") 會立刻截斷檔案再重寫，
+#      這期間被中斷或被別人讀到，就是一個空檔或半截檔——
+#      你辛苦補的好幾個月歷史會直接消失，這比更新遺失嚴重得多。
+#   2. 更新遺失。兩個行程各自讀到舊內容、各自合併、後寫的蓋掉先寫的。
+#
+# 這不是理論問題。實際會撞到的情況至少有兩種:
+#   · 手動跑 src/history.py 回補時，剛好碰上 15:00 的每日排程
+#     （main.py → paperdaily.ingest_quotes → save_bars 寫同一批檔案）
+#   · 兩個回補行程並行
+#
+# 解法分兩層：原子寫入解決第 1 種，檔案鎖解決第 2 種。
+
+try:
+    import fcntl
+except ImportError:      # Windows 沒有 fcntl
+    fcntl = None         # type: ignore[assignment]
+
+# 同一個行程內的執行緒用這把鎖。寫檔只有幾毫秒、抓資料要好幾秒，
+# 所以用一把全域鎖就夠，不值得為了每檔一把鎖增加複雜度。
+_write_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _exclusive(code: str):
+    """取得某檔的獨佔寫入權，跨執行緒也跨行程。
+
+    鎖檔是獨立的一個檔案，不是 CSV 本身——因為原子寫入會用
+    os.replace 換掉 CSV 的 inode，鎖在被換掉的 inode 上等於沒鎖。
+    """
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    lock_file = HISTORY_DIR / f".{code}.lock"
+    with _write_lock:
+        if fcntl is None:
+            yield                      # Windows：只有執行緒層級的保護
+            return
+        with lock_file.open("w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _write_atomic(path: Path, rows: list[Bar]) -> None:
+    """先寫暫存檔再一次換過去。
+
+    os.replace 在同一個檔案系統內是原子操作：讀的人要嘛看到舊的完整檔案，
+    要嘛看到新的完整檔案，不會看到寫到一半的狀態。
+    寫的過程中當掉的話，原本的檔案也還在。
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        for bar in rows:
+            writer.writerow(asdict(bar))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
 def history_path(code: str) -> Path:
     return HISTORY_DIR / f"{code}.csv"
 
@@ -134,26 +201,26 @@ def save_bars(code: str, bars: list[Bar]) -> int:
     合併而不是覆寫，是為了讓「從 raw 重建」和「從 TWSE 補歷史」
     可以混用，兩邊各補各的區間不會互相清掉。
     """
-    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    merged: dict[str, Bar] = {b.date: b for b in load_bars(code)}
-    for bar in bars:
-        if bar.is_valid:
-            merged[bar.date] = bar
+    with _exclusive(code):
+        # 讀取也要在鎖內：讀完才合併，中間不能有別人插進來寫，
+        # 否則對方的資料會被我們手上的舊快照蓋掉。
+        merged: dict[str, Bar] = {b.date: b for b in load_bars(code)}
+        for bar in bars:
+            if bar.is_valid:
+                merged[bar.date] = bar
 
-    ordered = [merged[d] for d in sorted(merged)]
-    path = history_path(code)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
-        writer.writeheader()
-        for bar in ordered:
-            writer.writerow(asdict(bar))
+        ordered = [merged[d] for d in sorted(merged)]
+        _write_atomic(history_path(code), ordered)
     return len(ordered)
 
 
 def available_codes() -> list[str]:
     if not HISTORY_DIR.exists():
         return []
-    return sorted(p.stem for p in HISTORY_DIR.glob("*.csv"))
+    # 排除 .tmp 與 .lock 之類的內部檔案，它們不是股票代號
+    return sorted(
+        p.stem for p in HISTORY_DIR.glob("*.csv") if not p.name.startswith(".")
+    )
 
 
 def coverage(code: str) -> tuple[str, str, int] | None:
