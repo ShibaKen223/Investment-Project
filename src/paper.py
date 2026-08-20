@@ -29,8 +29,10 @@ from strategy import (
     EntrySignal,
     ExitSignal,
     StrategyParams,
+    atr,
     check_entry,
     check_exit,
+    exit_levels,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -117,6 +119,7 @@ class PaperPosition:
     entry_reason: str = ""
     peak_close: float = 0.0   # 進場後最高收盤（移動停損用）
     bars_held: int = 0
+    entry_atr: float = 0.0    # 進場當下的 ATR，stop_mode="atr" 時決定停損寬度
 
     @property
     def cost_basis(self) -> float:
@@ -134,6 +137,7 @@ class Order:
     decided_on: str      # 做出判斷的交易日
     reason: str = ""
     detail: str = ""
+    atr: float = 0.0     # 下單當下的 ATR，成交時一併寫進部位
 
 
 @dataclass
@@ -300,6 +304,7 @@ def _fill_buy(
         entry_reason=order.detail,
         peak_close=price,
         bars_held=0,
+        entry_atr=order.atr,
     )
     return {
         "code": order.code,
@@ -478,6 +483,7 @@ def run_day(
             bars_held=pos.bars_held,
             params=params,
             peak_close=pos.peak_close,
+            entry_atr=pos.entry_atr,
         )
         if exit_sig.triggered:
             result.sell_orders.append(
@@ -545,6 +551,20 @@ def run_day(
             )
             continue
         projected_cash -= est_price * shares
+
+        # 停損寬度在下單當下就固定下來。用「今天」的 ATR 而不是之後每天重算，
+        # 是因為會移動的停損線沒辦法在進場前算出這筆交易最多會賠多少。
+        entry_atr = (
+            atr(series.bars, params.atr_period, series.index_of(trade_date) + 1)
+            if params.uses_atr
+            else None
+        ) or 0.0
+
+        detail = sig.explanation
+        if params.uses_atr:
+            _, _, basis = exit_levels(est_price, params, entry_atr)
+            detail += f"｜停損基準 {basis}"
+
         result.buy_orders.append(
             Order(
                 code=code,
@@ -552,7 +572,8 @@ def run_day(
                 shares=shares,
                 decided_on=trade_date,
                 reason="ENTRY",
-                detail=sig.explanation,
+                detail=detail,
+                atr=entry_atr,
             )
         )
 

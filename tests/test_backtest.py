@@ -195,6 +195,93 @@ print(f"（參考數字：合成資料上完成 {stats['trades']} 筆交易，"
 print("  ⚠️ 這是隨機漫步造出來的假資料，上面的報酬不代表任何事情。")
 
 print()
+print("--- ATR 模式端對端 ---")
+
+atr_params = StrategyParams(stop_mode="atr", atr_stop_multiple=2.0,
+                            atr_target_multiple=3.5)
+acct_atr = Account(cash=account_params.initial_cash)
+curve_atr: list[float] = []
+for day in backtest.trading_days(universe):
+    curve_atr.append(
+        paper.run_day(
+            acct_atr, day, universe, atr_params, account_params, costs
+        ).equity
+    )
+atr_stats = paper.performance(
+    acct_atr.trades, curve_atr, account_params.initial_cash
+)
+
+check(
+    "ATR 模式跑得完整段回測並產生交易",
+    atr_stats["trades"] > 0,
+    f"得到 {atr_stats['trades']} 筆",
+)
+check(
+    "淨值曲線與固定百分比模式不同（設定真的有生效）",
+    curve_atr != curve,
+)
+
+# 每個進場的部位都要記下當下的 ATR，否則停損線無從還原
+atr_recorded = True
+acct_probe = Account(cash=account_params.initial_cash)
+seen_atr: list[float] = []
+for day in backtest.trading_days(universe):
+    paper.run_day(acct_probe, day, universe, atr_params, account_params, costs)
+    for pos in acct_probe.positions.values():
+        seen_atr.append(pos.entry_atr)
+        if pos.entry_atr <= 0:
+            atr_recorded = False
+check(
+    "每個部位都記錄了進場當下的 ATR（停損線可事後還原）",
+    atr_recorded and seen_atr,
+    f"共觀察 {len(seen_atr)} 次持倉狀態",
+)
+
+check(
+    "ATR 模式下現金一樣不會變負",
+    acct_atr.cash >= -1e-6,
+    str(acct_atr.cash),
+)
+check(
+    "ATR 模式的成交價一樣落在當日高低區間內",
+    all(
+        (bar := universe[t.code].bar_on(t.exit_date)) is not None
+        and bar.low * 0.995 <= t.exit_price <= bar.high * 1.005
+        for t in acct_atr.trades
+    ),
+)
+check(
+    "停損出場的紀錄帶著 ATR 基準說明",
+    all(
+        "ATR" in t.exit_detail
+        for t in acct_atr.trades
+        if t.exit_reason == "STOP_LOSS"
+    ) or not any(t.exit_reason == "STOP_LOSS" for t in acct_atr.trades),
+)
+
+# 倍數放大 → 停損更寬 → 因停損出場的比例應下降
+loose = StrategyParams(stop_mode="atr", atr_stop_multiple=6.0,
+                       atr_target_multiple=3.5)
+acct_loose = Account(cash=account_params.initial_cash)
+for day in backtest.trading_days(universe):
+    paper.run_day(acct_loose, day, universe, loose, account_params, costs)
+check(
+    "ATR 倍數從 2 放寬到 6 → 停損出場變少",
+    sum(1 for t in acct_loose.trades if t.exit_reason == "STOP_LOSS")
+    < sum(1 for t in acct_atr.trades if t.exit_reason == "STOP_LOSS"),
+    f"2×: {sum(1 for t in acct_atr.trades if t.exit_reason == 'STOP_LOSS')} 筆 / "
+    f"6×: {sum(1 for t in acct_loose.trades if t.exit_reason == 'STOP_LOSS')} 筆",
+)
+
+print()
+print(f"（參考：ATR 模式完成 {atr_stats['trades']} 筆，"
+      f"總報酬 {atr_stats['total_return_pct']:+.2f}%，"
+      f"最大回撤 {atr_stats['max_drawdown_pct']:.2f}%；"
+      f"固定 % 模式為 {stats['trades']} 筆 / "
+      f"{stats['total_return_pct']:+.2f}% / {stats['max_drawdown_pct']:.2f}%）")
+print("  ⚠️ 兩者都是隨機漫步的假資料，不代表哪一種比較好。")
+
+print()
 if FAILURES:
     print(f"{len(FAILURES)} 項失敗 ❌")
     for name in FAILURES:

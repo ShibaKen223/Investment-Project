@@ -230,6 +230,122 @@ check(
 
 # ==========================================================================
 print()
+print("--- ATR 與波動度自適應停損 ---")
+# ==========================================================================
+
+# 固定高低差 10、完全沒有跳空 → ATR 就是 10
+steady = [
+    Bar(date=d, open=100, high=105, low=95, close=100, volume=1_000_000)
+    for d in _dates(30)
+]
+check(
+    "無跳空、固定區間 10 → ATR = 10",
+    abs(strategy.atr(steady, 14) - 10.0) < 1e-9,
+    str(strategy.atr(steady, 14)),
+)
+
+# 跳空的那根，真實區間要算進跳空的幅度，不能只看當根高低差
+gapped = steady[:20] + [
+    Bar(date="2026-03-02", open=120, high=130, low=120, close=125, volume=1_000_000)
+]
+check(
+    "跳空的 K：TR 取「今高 − 昨收」而不是當根高低差（30 而非 10）",
+    strategy.true_range(gapped, 20) == 30,
+    str(strategy.true_range(gapped, 20)),
+)
+check(
+    "第一根沒有昨收可比，退回高低差",
+    strategy.true_range(steady, 0) == 10,
+)
+check("索引超出範圍回傳 None", strategy.true_range(steady, 999) is None)
+check(
+    "歷史不足 period+1 根 → ATR 回傳 None（不硬算）",
+    strategy.atr(steady[:10], 14) is None,
+)
+check(
+    "ATR 只看到 end 為止（不偷看後面的跳空）",
+    abs(strategy.atr(gapped, 14, end=20) - 10.0) < 1e-9,
+    str(strategy.atr(gapped, 14, end=20)),
+)
+
+# --- 停損停利價位 ---
+p_pct = StrategyParams()
+p_atr = StrategyParams(stop_mode="atr", atr_stop_multiple=2.0,
+                       atr_target_multiple=3.5)
+
+stop_p, target_p, basis_p = strategy.exit_levels(100.0, p_pct)
+check(
+    "pct 模式：停損 92 / 停利 115",
+    abs(stop_p - 92.0) < 1e-9 and abs(target_p - 115.0) < 1e-9,
+    f"{stop_p} {target_p}",
+)
+
+stop_a, target_a, basis_a = strategy.exit_levels(100.0, p_atr, entry_atr=5.0)
+check(
+    "atr 模式：停損 = 進場價 − 2×ATR = 90",
+    abs(stop_a - 90.0) < 1e-9,
+    str(stop_a),
+)
+check(
+    "atr 模式：停利 = 進場價 + 3.5×ATR = 117.5",
+    abs(target_a - 117.5) < 1e-9,
+    str(target_a),
+)
+check("停損基準會說明清楚（供覆盤用）", "ATR(14)" in basis_a, basis_a)
+
+# 這是換 ATR 的整個理由：同樣的參數，不同波動度得到不同的停損寬度
+wide, _, _ = strategy.exit_levels(100.0, p_atr, entry_atr=5.0)
+narrow, _, _ = strategy.exit_levels(100.0, p_atr, entry_atr=1.0)
+check(
+    "高波動股停損放寬（−10%）、低波動股收緊（−2%）—— 這就是換 ATR 的理由",
+    abs(wide - 90.0) < 1e-9 and abs(narrow - 98.0) < 1e-9,
+    f"高波動 {wide}，低波動 {narrow}",
+)
+
+_, _, fallback_basis = strategy.exit_levels(100.0, p_atr, entry_atr=None)
+check(
+    "設定 ATR 但拿不到 ATR → 退回百分比，且在說明裡講明白（不靜靜換規則）",
+    "退回百分比" in fallback_basis,
+    fallback_basis,
+)
+check(
+    "退回時用的是固定百分比的價位",
+    abs(strategy.exit_levels(100.0, p_atr, entry_atr=None)[0] - 92.0) < 1e-9,
+)
+
+# --- 出場判斷真的有吃 ATR ---
+atr_stop_bars = seq_bars([100, 95, 89])
+check(
+    "ATR 模式：跌破 2×ATR 觸發停損（固定 8% 下同樣觸發，但基準不同）",
+    check_exit(100.0, atr_stop_bars, 2, 3, p_atr, entry_atr=5.0).reason
+    == strategy.STOP_LOSS,
+)
+mild = seq_bars([100, 97, 95])
+check(
+    "ATR=5 時 −5% 還不出場，ATR=1 時同樣的跌幅就該停損",
+    not check_exit(100.0, mild, 2, 3, p_atr, entry_atr=5.0).triggered
+    and check_exit(100.0, mild, 2, 3, p_atr, entry_atr=1.0).reason
+    == strategy.STOP_LOSS,
+)
+check(
+    "停損訊息裡帶著基準，兩個月後看得出當時用什麼算的",
+    "ATR(14)" in check_exit(100.0, atr_stop_bars, 2, 3, p_atr,
+                            entry_atr=5.0).detail,
+)
+check(
+    f"ATR 模式的暖身期會把 atr_period 算進去",
+    StrategyParams(stop_mode="atr", atr_period=90).warmup_bars == 92,
+    str(StrategyParams(stop_mode="atr", atr_period=90).warmup_bars),
+)
+check(
+    "atr_period 小於其他指標時，暖身期不受影響",
+    StrategyParams(stop_mode="atr", atr_period=14).warmup_bars
+    == StrategyParams().warmup_bars,
+)
+
+
+# ==========================================================================
+print()
 print("--- 成交 ---")
 # ==========================================================================
 

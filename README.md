@@ -167,11 +167,19 @@ config/sectors.yaml    產業地圖（26 檔）
 python3 src/history.py --months 24
 ```
 
-預設補「持股 + 觀察清單」裡的所有代號。看目前累積到哪：
+預設補「持股 + 觀察清單」裡的所有代號。
+
+**只會抓缺的月份**——過去的日 K 不會再變，已經有的直接跳過，
+所以第一次大約三分鐘，之後每次只補最近兩個月，幾秒就好。
+每抓完一個月就存檔，中途 Ctrl+C 不會弄丟已經抓到的部分，重跑會從缺的地方接下去。
 
 ```bash
-python3 src/history.py --status
+python3 src/history.py --status     # 看目前累積到哪
+python3 src/history.py --force      # 連已有的月份也重抓
+INVEST_FETCH_DELAY=0.8 python3 src/history.py   # 調快（預設 1.5 秒／次）
 ```
+
+> 間隔調太低會被端點擋，被擋了反而更慢，不建議低於 1 秒。
 
 **2. 先回測，看這組參數在過去會做什麼**
 
@@ -199,6 +207,34 @@ python3 src/backtest.py --verbose      # 印出每一筆成交
 出場四選一，**停損優先**：停損 −8%、停利 +15%、移動停損（預設關閉）、
 或抱滿 15 根 K 還沒觸發就時間出場。最後這條是「波段」的定義——
 沒有它，一檔不上不下的股票會變成你根本沒打算做的長期投資。
+
+### 停損寬度：固定 % 還是跟著波動度走
+
+`config/paper.yaml` 的 `stop_mode` 有兩個選擇：
+
+| 模式 | 停損怎麼算 | 適合 |
+| --- | --- | --- |
+| `pct`（預設） | 固定 −8%，每檔一視同仁 | 波動度接近的一組標的 |
+| `atr` | 進場價 − 2 × ATR(14) | 波動度差很多的一組標的 |
+
+**ATR（平均真實區間）就是「這檔一天通常會動多少錢」**，單位是元不是百分比，
+而且會把跳空算進去——一根開盤就跳空的 K，只看高低差會低估它的波動。
+
+為什麼會想換：固定 8% 對每檔都一樣，但一檔日常波動 1% 的電信股
+和一檔波動 10% 的航運股，8% 的意義完全不同。研究筆記會直接幫你換算：
+
+> ATR(14) **7.18 元**（現價的 10.1%，也就是「一天通常會動這麼多」）——
+> **這檔的 8% 停損太緊**，只有 0.8 倍日常波動，很容易被雜訊掃出場。
+
+> ATR(14) **0.94 元**（現價的 1.0%）——8% 停損等於 8.3 倍日常波動，**偏寬**，
+> 真的觸發時已經賠了不少。
+
+停損寬度在**進場當下就固定**，之後不會隨 ATR 變動——
+會移動的停損線沒辦法讓你在進場前算出這筆最多會賠多少。
+每筆成交紀錄都會寫下當時用的基準（`2×ATR(14)＝10.00 元`），覆盤時看得出來。
+
+設成 `atr` 但進場時歷史不足以算 ATR 的話，會退回固定百分比，
+**並在紀錄裡註明**——安靜地換一套規則是最糟的做法。
 
 ### 三個刻意保守的設定
 
@@ -301,8 +337,9 @@ python3 src/main.py                      # 產生今日報告（模擬倉也會�
 python3 src/main.py --dry-run            # 只印出，不寫檔
 python3 src/main.py --no-paper           # 這次跳過模擬倉
 
-python3 src/history.py --months 24       # 補歷史日 K
+python3 src/history.py --months 24       # 補歷史日 K（只抓缺的月份）
 python3 src/history.py --status          # 看目前累積到哪
+python3 src/history.py --force           # 連已有的月份也重抓
 python3 src/history.py --from-raw        # 用每日存檔重建，不連外網
 python3 src/history.py --self-test       # 檢查資料源端點還正不正常
 
@@ -325,7 +362,7 @@ python3 tests/test_store.py       # 透過介面改設定不會弄壞 YAML
 python3 tests/test_paper.py       # 交易成本、進出場訊號、成交、名額上限
 python3 tests/test_history.py     # 日 K 存取、民國日期、TWSE 解析
 python3 tests/test_backtest.py    # 回測引擎的不變式（合成資料，不連網）
-python3 tests/test_research.py    # 指標計算、名詞查詢、知識庫完整性
+python3 tests/test_research.py    # 指標計算、ATR、名詞查詢、知識庫完整性
 ```
 
 全部不需要 pytest，也不連外網，跑完會印 `全部通過 ✅` 或以非零狀態結束。
@@ -383,7 +420,6 @@ python3 src/history.py --self-test
   其餘邏輯不動——但那是完全不同的風險等級，先看幾個月模擬績效再說。
 - **研究筆記接上真實資訊源**：目前只有價格資料和人工整理的靜態背景，
   沒有新聞、財報、法說會、法人買賣。這是「為什麼漲」答不出來的原因。
-- **ATR 動態停損**：`strategy.yaml` 已預留設計，現在有日 K 歷史了，可以接。
 - **Windows / Linux**：桌面捷徑與每日排程都是 macOS 專用
   （`.app` 與 LaunchAgent）。核心的 Python 程式本身跨平台，
   但那兩塊要改寫。

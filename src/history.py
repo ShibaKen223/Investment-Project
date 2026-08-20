@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, asdict
@@ -42,8 +43,16 @@ TWSE_STOCK_DAY = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
 TPEX_TRADING_STOCK = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
 TIMEOUT = 30
 RETRIES = 3
-# TWSE 對逐檔查詢有流量限制，連續抓多個月份時每次之間要停一下。
-POLITE_DELAY = 3.0
+# 這兩支端點對逐檔查詢有流量限制，連續抓多個月份時每次之間要停一下。
+# 可用環境變數調整：INVEST_FETCH_DELAY=0.5 python3 src/history.py
+# 調低會變快，但被擋的機率上升，被擋了反而更慢——不建議低於 1。
+POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "1.5"))
+
+# 一個交易月最少有幾根 K 才算「這個月已經抓齊了」。
+# 農曆年的二月最少大約 13 個交易日，取這個數當門檻。
+MIN_BARS_PER_MONTH = 13
+# 最近幾個月一律重抓：當月還在累積，上個月也可能有補登。
+ALWAYS_REFRESH_MONTHS = 2
 
 FIELDNAMES = ["date", "open", "high", "low", "close", "volume"]
 
@@ -408,34 +417,101 @@ def _month_sequence(months: int, today: date | None = None) -> list[tuple[int, i
     return list(reversed(seq))
 
 
+def months_needed(
+    code: str,
+    months: int,
+    today: date | None = None,
+    force: bool = False,
+) -> list[tuple[int, int]]:
+    """哪些月份真的需要連線去抓。
+
+    已經抓齊的過去月份會跳過——過去的日 K 不會再變，重抓只是浪費時間。
+    這讓第二次以後的執行從好幾分鐘縮短到幾秒。
+    最近兩個月一律重抓：當月還在累積，上個月也可能有事後補登。
+    """
+    sequence = _month_sequence(months, today)
+    if force:
+        return sequence
+
+    counts: dict[str, int] = {}
+    for bar in load_bars(code):
+        key = bar.date[:7]
+        counts[key] = counts.get(key, 0) + 1
+
+    always = set(sequence[-ALWAYS_REFRESH_MONTHS:])
+    return [
+        (year, month)
+        for year, month in sequence
+        if (year, month) in always
+        or counts.get(f"{year:04d}-{month:02d}", 0) < MIN_BARS_PER_MONTH
+    ]
+
+
+def detect_market(code: str, year: int, month: int) -> str:
+    """用一次請求判斷這檔在哪個市場掛牌。
+
+    以前的做法是「整段 24 個月先打上市，一根都沒有再整段打上櫃」，
+    上櫃股因此要付兩倍的請求數。改成先探一個月就好。
+    """
+    try:
+        if fetch_twse_month(code, year, month):
+            return "twse"
+    except RuntimeError:
+        pass
+    try:
+        if fetch_tpex_month(code, year, month):
+            return "tpex"
+    except RuntimeError:
+        pass
+    return "unknown"
+
+
 def backfill(
     code: str,
     months: int = 12,
     today: date | None = None,
     market: str = "auto",
-) -> tuple[int, str]:
-    """補齊某檔最近 N 個月的日 K，回傳 (總筆數, 實際用的市場)。
+    force: bool = False,
+    progress=None,
+) -> tuple[int, str, int]:
+    """補齊某檔最近 N 個月的日 K。
 
-    market="auto" 會先試上市，一根 K 都拿不到就改試上櫃——
-    因為代號本身看不出它在哪個市場掛牌。
+    回傳 (資料總筆數, 實際用的市場, 這次連線抓了幾個月)。
+
+    每抓完一個月就存檔，不是全部抓完才存——
+    中途 Ctrl+C 或斷線時，已經抓到的不會消失，重跑會從缺的地方接下去。
     """
-    def _pull(fetch) -> list[Bar]:
-        bars: list[Bar] = []
-        for year, month in _month_sequence(months, today):
-            bars.extend(fetch(code, year, month))
-            time.sleep(POLITE_DELAY)
-        return bars
+    todo = months_needed(code, months, today, force)
+    if not todo:
+        bars = load_bars(code)
+        return len(bars), "已是最新", 0
 
-    if market == "tpex":
-        return save_bars(code, _pull(fetch_tpex_month)), "上櫃"
-    if market == "twse":
-        return save_bars(code, _pull(fetch_twse_month)), "上市"
+    if market == "auto":
+        detected = detect_market(code, *todo[-1])   # 用最近的月份探，最可能有資料
+        if detected == "unknown":
+            return len(load_bars(code)), "查無資料", 0
+        market = detected
 
-    bars = _pull(fetch_twse_month)
-    if bars:
-        return save_bars(code, bars), "上市"
-    bars = _pull(fetch_tpex_month)
-    return save_bars(code, bars), "上櫃" if bars else "查無資料"
+    fetch = fetch_twse_month if market == "twse" else fetch_tpex_month
+    label = "上市" if market == "twse" else "上櫃"
+
+    fetched = 0
+    for index, (year, month) in enumerate(todo):
+        if index > 0:
+            time.sleep(POLITE_DELAY)   # 只在請求之間停，最後一次不用
+        try:
+            bars = fetch(code, year, month)
+        except RuntimeError as exc:
+            if progress:
+                progress(code, year, month, None, str(exc))
+            continue
+        if bars:
+            save_bars(code, bars)      # 每個月存一次 → 可中斷、可續傳
+            fetched += 1
+        if progress:
+            progress(code, year, month, len(bars), None)
+
+    return len(load_bars(code)), label, fetched
 
 
 # --------------------------------------------------------------------------
@@ -474,7 +550,8 @@ def main() -> int:
         help="逗號分隔的股票代號；省略則用 config/positions.yaml 裡的持股與觀察清單",
     )
     parser.add_argument(
-        "--months", type=int, default=12, help="從 TWSE 補幾個月（預設 12）"
+        "--months", type=int, default=12,
+        help="回補幾個月（預設 12）。已經有資料的月份會自動跳過"
     )
     parser.add_argument(
         "--from-raw",
@@ -485,6 +562,11 @@ def main() -> int:
         "--status", action="store_true", help="只顯示目前每檔的資料涵蓋範圍"
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="連已經有資料的月份也重抓（預設會跳過，只補缺的）",
+    )
+    parser.add_argument(
         "--market",
         choices=["auto", "twse", "tpex"],
         default="auto",
@@ -493,7 +575,7 @@ def main() -> int:
     parser.add_argument(
         "--self-test",
         action="store_true",
-        help="抓一個月的 2330 並印出原始欄位，用來確認端點格式沒改版",
+        help="對上市與上櫃各抓一次並印出實際欄位，確認端點格式沒改版",
     )
     args = parser.parse_args()
 
@@ -581,20 +663,60 @@ def main() -> int:
             print(f"{code}: {count} 根（從 data/raw/ 重建）")
         return 0
 
+    # 先算出實際要抓幾個月，才能給出誠實的時間預估。
+    # 第二次以後大部分月份會被跳過，預估數字會小很多。
+    plan = {c: months_needed(c, args.months, force=args.force) for c in codes}
+    total_months = sum(len(v) for v in plan.values())
+    probes = sum(1 for c in codes if plan[c] and args.market == "auto")
+
+    if total_months == 0:
+        print("所有標的的歷史都已是最新，沒有需要連線抓的月份。")
+        print("（要強制重抓請加 --force）")
+        for code in codes:
+            info = coverage(code)
+            if info:
+                start, end, count = info
+                print(f"  {code}: {start} ~ {end}  共 {count} 根")
+        return 0
+
+    estimate = (total_months + probes) * POLITE_DELAY / 60
     print(
-        f"補 {len(codes)} 檔 × {args.months} 個月，每次請求間隔 {POLITE_DELAY}s。"
-        f"預估最少 {len(codes) * args.months * POLITE_DELAY / 60:.0f} 分鐘，"
-        f"跑的時候可以先去做別的事。"
+        f"要抓 {total_months} 個月（{len(codes)} 檔），"
+        f"每次請求間隔 {POLITE_DELAY}s，預估約 {max(estimate, 0.1):.1f} 分鐘。"
     )
+    already = args.months * len(codes) - total_months
+    if already > 0:
+        print(f"已經有資料的 {already} 個月會跳過。")
+    print("每抓完一個月就存檔，中途 Ctrl+C 不會弄丟已抓到的部分。")
+    print()
+
+    def show(code: str, year: int, month: int, count: int | None, error: str | None):
+        if error:
+            print(f"  {code} {year}-{month:02d}  失敗：{error}")
+        else:
+            print(f"  {code} {year}-{month:02d}  {count} 根", flush=True)
+
     for code in codes:
+        if not plan[code]:
+            info = coverage(code)
+            print(f"{code}: 已是最新（{info[2] if info else 0} 根）")
+            continue
         try:
-            count, market = backfill(code, args.months, market=args.market)
-            if count:
-                print(f"{code}: {count} 根（{market}）")
-            else:
-                print(f"{code}: 查無資料 —— 代號可能有誤，或這檔不在上市／上櫃")
+            count, market, fetched = backfill(
+                code,
+                args.months,
+                market=args.market,
+                force=args.force,
+                progress=show,
+            )
         except RuntimeError as exc:
             print(f"{code}: 失敗 —— {exc}")
+            continue
+        if count:
+            print(f"{code}: 共 {count} 根（{market}，這次抓了 {fetched} 個月）")
+        else:
+            print(f"{code}: 查無資料 —— 代號可能有誤，或這檔不在上市／上櫃")
+        print()
 
     return 0
 

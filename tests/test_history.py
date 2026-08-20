@@ -299,6 +299,77 @@ try:
 
     # ======================================================================
     print()
+    print("--- 增量回補（決定哪些月份要連線）---")
+    # ======================================================================
+    # 過去的日 K 不會再變，重抓只是浪費時間。
+    # 這段邏輯讓第二次以後的執行從好幾分鐘縮短到幾秒。
+
+    from datetime import date as _date
+
+    ref = _date(2026, 8, 20)
+
+    fresh = history.months_needed("NEVER_FETCHED", 6, today=ref)
+    check(
+        "完全沒資料 → 6 個月全部都要抓",
+        len(fresh) == 6,
+        str(fresh),
+    )
+    check(
+        "月份由舊到新排序，最後一個是當月",
+        fresh[-1] == (2026, 8) and fresh[0] == (2026, 3),
+        str(fresh),
+    )
+
+    # 幫 2026-03 ~ 2026-06 各塞滿一個月的資料
+    filled: list[Bar] = []
+    for month in (3, 4, 5, 6):
+        for day in range(1, 21):
+            filled.append(bar(f"2026-{month:02d}-{day:02d}"))
+    history.save_bars("PARTIAL", filled)
+
+    todo = history.months_needed("PARTIAL", 6, today=ref)
+    check(
+        "已抓齊的過去月份會跳過（只剩 7 月與 8 月）",
+        todo == [(2026, 7), (2026, 8)],
+        str(todo),
+    )
+
+    # 最近兩個月即使有資料也要重抓（當月還在累積、上月可能補登）
+    recent: list[Bar] = list(filled)
+    for month in (7, 8):
+        for day in range(1, 21):
+            recent.append(bar(f"2026-{month:02d}-{day:02d}"))
+    history.save_bars("RECENT", recent)
+    todo_recent = history.months_needed("RECENT", 6, today=ref)
+    check(
+        "最近兩個月一律重抓，即使已經有資料",
+        todo_recent == [(2026, 7), (2026, 8)],
+        str(todo_recent),
+    )
+
+    # 資料稀疏的月份要重抓（可能是上次抓到一半被中斷）
+    sparse = [bar(f"2026-03-{day:02d}") for day in range(1, 4)]
+    history.save_bars("SPARSE", sparse)
+    check(
+        "某月只有零星幾根（上次抓一半被中斷）→ 該月要重抓",
+        (2026, 3) in history.months_needed("SPARSE", 6, today=ref),
+        str(history.months_needed("SPARSE", 6, today=ref)),
+    )
+
+    check(
+        "--force 會忽略既有資料，全部重抓",
+        len(history.months_needed("PARTIAL", 6, today=ref, force=True)) == 6,
+    )
+
+    check(
+        "跨年時月份序列正確（2026-01 往前推到 2025-11）",
+        history.months_needed("NEVER", 3, today=_date(2026, 1, 15))
+        == [(2025, 11), (2025, 12), (2026, 1)],
+        str(history.months_needed("NEVER", 3, today=_date(2026, 1, 15))),
+    )
+
+    # ======================================================================
+    print()
     print("--- 從 data/raw/ 重建 ---")
     # ======================================================================
 

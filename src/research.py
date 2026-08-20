@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import history  # noqa: E402
 from history import Bar  # noqa: E402
+from strategy import atr as compute_atr  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
@@ -94,6 +95,8 @@ class Facts:
     pct_from_high: float | None = None
     range_position: float | None = None      # 0 = 一年最低, 100 = 一年最高
     volatility: float | None = None          # 年化波動度 %
+    atr14: float | None = None               # ATR(14)，單位是元
+    atr_pct: float | None = None             # ATR 佔現價的百分比
     volume_ratio: float | None = None        # 近 5 日均量 / 近 60 日均量
     above_ma20: bool | None = None
     above_ma60: bool | None = None
@@ -167,6 +170,9 @@ def compute_facts(code: str, bars: list[Bar], benchmark: list[Bar] | None = None
             facts.range_position = (facts.close - facts.low_52w) / span * 100
 
     facts.volatility = _volatility(bars)
+    facts.atr14 = compute_atr(bars, 14)
+    if facts.atr14 is not None and facts.close > 0:
+        facts.atr_pct = facts.atr14 / facts.close * 100
 
     if len(bars) >= 60:
         recent = sum(b.volume for b in bars[-5:]) / 5
@@ -266,18 +272,37 @@ def describe_shape(facts: Facts, peers: list[tuple[str, str, float]]) -> list[st
                 f"{facts.volume_ratio:.1f} 倍），市場關注度下降。"
             )
 
-    # 波動度 —— 這條直接關係到停損該設多寬
+    # 波動度與 ATR —— 這兩條直接關係到停損該設多寬
     if facts.volatility is not None:
         if facts.volatility >= 50:
             level = "很高"
-            note = "固定 8% 的停損很容易被日常波動掃出場，這種標的要嘛放寬、要嘛不做"
         elif facts.volatility >= 30:
             level = "中等偏高"
-            note = "8% 停損大約是 1～2 天的正常波動幅度"
         else:
             level = "偏低"
-            note = "波動小，8% 停損相對寬鬆"
-        lines.append(f"- 年化波動度 **{facts.volatility:.0f}%**（{level}）——{note}。")
+        lines.append(f"- 年化波動度 **{facts.volatility:.0f}%**（{level}）。")
+
+    if facts.atr14 is not None and facts.atr_pct:
+        # 把「8% 停損」換算成這檔的日常波動有幾倍，抽象的百分比才會變具體
+        multiple = 8.0 / facts.atr_pct
+        if multiple < 1.5:
+            verdict = (
+                f"**這檔的 8% 停損太緊**——只有 {multiple:.1f} 倍日常波動，"
+                f"很容易被雜訊掃出場。這種標的適合改用 ATR 停損"
+                f"（`config/paper.yaml` 把 stop_mode 改成 atr）"
+            )
+        elif multiple > 5:
+            verdict = (
+                f"8% 停損等於 {multiple:.1f} 倍日常波動，**偏寬**——"
+                f"真的觸發時已經賠了不少"
+            )
+        else:
+            verdict = f"8% 停損約等於 {multiple:.1f} 倍日常波動，算合理"
+        lines.append(
+            f"- ATR(14) **{facts.atr14:,.2f} 元**"
+            f"（現價的 {facts.atr_pct:.1f}%，也就是「一天通常會動這麼多」）"
+            f"——{verdict}。"
+        )
 
     # 相對大盤
     if facts.relative_strength is not None:

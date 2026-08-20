@@ -193,6 +193,54 @@ try:
 
     # ======================================================================
     print()
+    print("--- ATR（停損寬度的依據）---")
+    # ======================================================================
+
+    # 固定高低差 10、收盤都在 100 → ATR = 10，佔現價 10%
+    steady = [
+        Bar(d, 100.0, 105.0, 95.0, 100.0, 1_000_000) for d in
+        [b.date for b in bars_from([100.0] * 40)]
+    ]
+    steady_facts = research.compute_facts("STEADY", steady)
+    check(
+        "ATR(14) 算出來是 10 元",
+        abs(steady_facts.atr14 - 10.0) < 1e-9,
+        str(steady_facts.atr14),
+    )
+    check(
+        "ATR 佔現價的百分比 = 10%",
+        abs(steady_facts.atr_pct - 10.0) < 1e-9,
+        str(steady_facts.atr_pct),
+    )
+    check(
+        "資料不足時 ATR 為 None，不硬算",
+        research.compute_facts("TINY", bars_from([100.0, 101.0])).atr14 is None,
+    )
+
+    # 高波動 → 報告應該說 8% 停損太緊
+    loud = research.describe_shape(steady_facts, [])
+    check(
+        "ATR 佔比 10% 時，報告指出 8% 停損太緊",
+        any("太緊" in line for line in loud),
+        str([l for l in loud if "ATR" in l]),
+    )
+
+    # 低波動（高低差 0.5，現價 100 → ATR 0.5%）→ 應該說偏寬
+    quiet_bars = [
+        Bar(d, 100.0, 100.25, 99.75, 100.0, 1_000_000) for d in
+        [b.date for b in bars_from([100.0] * 40)]
+    ]
+    quiet = research.describe_shape(
+        research.compute_facts("QUIET", quiet_bars), []
+    )
+    check(
+        "ATR 佔比極低時，報告指出 8% 停損偏寬",
+        any("偏寬" in line for line in quiet),
+        str([l for l in quiet if "ATR" in l]),
+    )
+
+    # ======================================================================
+    print()
     print("--- 均線狀態與相對強弱 ---")
     # ======================================================================
 
