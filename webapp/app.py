@@ -413,6 +413,17 @@ def history():
     )
 
 
+@app.route("/help")
+def help_page():
+    """使用說明。
+
+    刻意做成畫面上的一頁，而不是只放在 README——
+    會來翻 README 的人本來就看得懂，
+    真正需要說明的人不會去打開專案資料夾裡的 .md 檔。
+    """
+    return render_template("help.html")
+
+
 @app.route("/research")
 def research():
     """研究筆記：價格算出來的事實 + 產業背景 + 名詞辭典。
