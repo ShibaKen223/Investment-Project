@@ -170,16 +170,40 @@ python3 src/history.py --months 24
 預設補「持股 + 觀察清單」裡的所有代號。
 
 **只會抓缺的月份**——過去的日 K 不會再變，已經有的直接跳過，
-所以第一次大約三分鐘，之後每次只補最近兩個月，幾秒就好。
+所以第一次大約兩到三分鐘，之後每次只補最近兩個月，幾秒就好。
 每抓完一個月就存檔，中途 Ctrl+C 不會弄丟已經抓到的部分，重跑會從缺的地方接下去。
+執行時會逐月印出進度和剩餘時間。
 
 ```bash
 python3 src/history.py --status     # 看目前累積到哪
 python3 src/history.py --force      # 連已有的月份也重抓
-INVEST_FETCH_DELAY=0.8 python3 src/history.py   # 調快（預設 1.5 秒／次）
+python3 src/history.py --months 12  # 只補 12 個月（250 根 K，第一次回測夠用）
 ```
 
-> 間隔調太低會被端點擋，被擋了反而更慢，不建議低於 1 秒。
+### 為什麼不是「抓 N 次 × 等 N 次」
+
+這兩支端點偶爾會慢到好幾秒才回應。如果寫成「送出 → 等回應 → 停一下 → 下一個」，
+總時間會是 **次數 ×（延遲 + 間隔）**，延遲才是大頭，間隔完全不是瓶頸。
+
+所以這兩件事被拆開了：
+
+- **多久送一次請求**：全域限速，對端點的禮貌，預設 1.2 秒
+- **等回應**：交給併發蓋掉，預設 6 檔同時進行
+
+總時間變成 `max(次數 × 間隔, 延遲 ÷ 併發數)`，跟延遲幾乎脫鉤。
+**多開 worker 不會讓請求變密**，限速器仍然管著發送節奏，
+只是允許更多請求同時在路上等回應。
+
+要調的話：
+
+```bash
+INVEST_FETCH_DELAY=0.8   python3 src/history.py   # 發送間隔（秒）
+INVEST_FETCH_WORKERS=10  python3 src/history.py   # 同時抓幾檔
+INVEST_FETCH_TIMEOUT=20  python3 src/history.py   # 單次請求逾時（秒）
+```
+
+> 間隔調太低會被端點擋，被擋了反而更慢，不建議低於 0.5 秒。
+> 如果進度裡出現大量「失敗」，那是端點在擋你，把間隔調高而不是調低。
 
 **2. 先回測，看這組參數在過去會做什麼**
 
@@ -340,6 +364,7 @@ python3 src/main.py --no-paper           # 這次跳過模擬倉
 python3 src/history.py --months 24       # 補歷史日 K（只抓缺的月份）
 python3 src/history.py --status          # 看目前累積到哪
 python3 src/history.py --force           # 連已有的月份也重抓
+python3 src/history.py --workers 10      # 同時抓幾檔（發送頻率不受影響）
 python3 src/history.py --from-raw        # 用每日存檔重建，不連外網
 python3 src/history.py --self-test       # 檢查資料源端點還正不正常
 

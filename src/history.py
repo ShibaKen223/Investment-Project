@@ -26,7 +26,9 @@ import csv
 import json
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 from datetime import date
 from pathlib import Path
@@ -41,12 +43,26 @@ RAW_DIR = ROOT / "data" / "raw"
 
 TWSE_STOCK_DAY = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
 TPEX_TRADING_STOCK = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
-TIMEOUT = 30
+# 逾時要短。這兩支端點偶爾會卡住不回應，配上重試的話
+# 單一個月最壞情況會拖到 timeout × RETRIES —— 30 秒 × 3 = 90 秒，
+# 一個月就吃掉一分半，這是回補會慢到不合理的主因。
+TIMEOUT = float(os.environ.get("INVEST_FETCH_TIMEOUT", "12"))
 RETRIES = 3
-# 這兩支端點對逐檔查詢有流量限制，連續抓多個月份時每次之間要停一下。
-# 可用環境變數調整：INVEST_FETCH_DELAY=0.5 python3 src/history.py
-# 調低會變快，但被擋的機率上升，被擋了反而更慢——不建議低於 1。
-POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "1.5"))
+
+# 兩次請求之間至少間隔多久（秒）。這是**全域**的發送頻率上限，
+# 不是「等完上一個回應再等這麼久」——差別很大，見 _RateLimiter。
+# 可用環境變數調整：INVEST_FETCH_DELAY=0.8 python3 src/history.py
+# 調太低會被端點擋，被擋了反而更慢，不建議低於 0.5。
+POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "1.2"))
+
+# 同時有幾檔在抓。併發是為了「蓋掉網路延遲」，不是為了提高發送頻率——
+# 發送頻率仍由上面的 POLITE_DELAY 全域控管，開幾個 worker 都不會送得更密，
+# 只是允許更多請求同時在路上等回應。
+#
+# 要蓋掉延遲，worker 數大約需要 延遲 ÷ 間隔。端點慢到每次 6 秒時，
+# 6 個 worker 才勉強跟得上 1.2 秒的發送節奏；worker 太少的話，
+# 瓶頸會從「發送頻率」變成「等回應」，那就白設限速器了。
+MAX_WORKERS = int(os.environ.get("INVEST_FETCH_WORKERS", "6"))
 
 # 一個交易月最少有幾根 K 才算「這個月已經抓齊了」。
 # 農曆年的二月最少大約 13 個交易日，取這個數當門檻。
@@ -255,6 +271,56 @@ def _squash(text: object) -> str:
     return "".join(str(text).split()).replace("\u3000", "")
 
 
+class _RateLimiter:
+    """全域發送頻率上限。
+
+    原本的寫法是「送出請求 → 等回應 → sleep 1.5 秒 → 下一個」，
+    總時間會是 次數 ×（網路延遲 + 1.5 秒）。端點慢的時候延遲才是大頭，
+    sleep 完全不是瓶頸——99 個月因此跑了八分多鐘，而不是預估的 2.6 分鐘。
+
+    這個類別把兩件事分開:
+        「多久發一次請求」由這裡統一控管（對端點的禮貌）
+        「等回應」交給併發去蓋掉（我們自己的效率）
+    總時間變成 max(次數 × 間隔, 網路延遲)，跟延遲幾乎脫鉤。
+    """
+
+    def __init__(self, min_interval: float) -> None:
+        self._min_interval = min_interval
+        self._lock = threading.Lock()
+        self._next_slot = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            delay = max(0.0, self._next_slot - now)
+            self._next_slot = max(now, self._next_slot) + self._min_interval
+        if delay > 0:
+            time.sleep(delay)
+
+
+_limiter = _RateLimiter(POLITE_DELAY)
+
+
+def _request_json(url: str, params: dict) -> dict:
+    """送出一次請求並回傳 JSON。頻率由 _limiter 控管，失敗會重試。
+
+    重試之間用遞增的等待（1×、2× 間隔），避免在端點正忙的時候
+    用同樣的節奏一直撞上去。
+    """
+    last_error: Exception | None = None
+    for attempt in range(1, RETRIES + 1):
+        _limiter.wait()
+        try:
+            resp = requests.get(url, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < RETRIES:
+                time.sleep(POLITE_DELAY * attempt)
+    raise RuntimeError(str(last_error)) from last_error
+
+
 def _field_index(fields: list[str], *keywords: str) -> int | None:
     """在 fields 裡找第一個包含任一關鍵字的欄位位置（忽略空白）。"""
     squashed_keywords = [_squash(kw) for kw in keywords]
@@ -367,19 +433,12 @@ def fetch_tpex_month(code: str, year: int, month: int) -> list[Bar]:
         "id": "",
         "response": "json",
     }
-    last_error: Exception | None = None
-    for attempt in range(1, RETRIES + 1):
-        try:
-            resp = requests.get(TPEX_TRADING_STOCK, params=params, timeout=TIMEOUT)
-            resp.raise_for_status()
-            return parse_trading_stock(resp.json())
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if attempt < RETRIES:
-                time.sleep(POLITE_DELAY)
-    raise RuntimeError(
-        f"抓取失敗 {code} {year}-{month:02d}（上櫃，{RETRIES} 次重試）"
-    ) from last_error
+    try:
+        return parse_trading_stock(_request_json(TPEX_TRADING_STOCK, params))
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"抓取失敗 {code} {year}-{month:02d}（上櫃，{RETRIES} 次重試）：{exc}"
+        ) from exc
 
 
 def fetch_twse_month(code: str, year: int, month: int) -> list[Bar]:
@@ -389,19 +448,12 @@ def fetch_twse_month(code: str, year: int, month: int) -> list[Bar]:
         "stockNo": code,
         "response": "json",
     }
-    last_error: Exception | None = None
-    for attempt in range(1, RETRIES + 1):
-        try:
-            resp = requests.get(TWSE_STOCK_DAY, params=params, timeout=TIMEOUT)
-            resp.raise_for_status()
-            return parse_stock_day(resp.json())
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if attempt < RETRIES:
-                time.sleep(POLITE_DELAY)
-    raise RuntimeError(
-        f"抓取失敗 {code} {year}-{month:02d}（{RETRIES} 次重試）"
-    ) from last_error
+    try:
+        return parse_stock_day(_request_json(TWSE_STOCK_DAY, params))
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"抓取失敗 {code} {year}-{month:02d}（上市，{RETRIES} 次重試）：{exc}"
+        ) from exc
 
 
 def _month_sequence(months: int, today: date | None = None) -> list[tuple[int, int]]:
@@ -496,9 +548,9 @@ def backfill(
     label = "上市" if market == "twse" else "上櫃"
 
     fetched = 0
-    for index, (year, month) in enumerate(todo):
-        if index > 0:
-            time.sleep(POLITE_DELAY)   # 只在請求之間停，最後一次不用
+    for year, month in todo:
+        # 這裡不再 sleep —— 發送頻率由 _limiter 全域控管，
+        # 在這裡等只會把併發的效果抵銷掉。
         try:
             bars = fetch(code, year, month)
         except RuntimeError as exc:
@@ -512,6 +564,46 @@ def backfill(
             progress(code, year, month, len(bars), None)
 
     return len(load_bars(code)), label, fetched
+
+
+def backfill_many(
+    codes: list[str],
+    months: int = 12,
+    today: date | None = None,
+    market: str = "auto",
+    force: bool = False,
+    workers: int = MAX_WORKERS,
+    progress=None,
+) -> dict[str, tuple[int, str, int]]:
+    """同時回補多檔。回傳 {代號: (總筆數, 市場, 這次抓了幾個月)}。
+
+    併發是跨「標的」而不是跨「月份」:
+      · 每檔寫自己的 CSV，不會互相踩到
+      · 同一檔的月份仍照順序抓，出錯時比較好判斷是哪一段有問題
+
+    發送頻率仍由 _limiter 全域控管，所以開幾個 worker 都不會讓
+    對端點的請求變密——只是把等回應的時間疊在一起而已。
+    """
+    if not codes:
+        return {}
+
+    results: dict[str, tuple[int, str, int]] = {}
+    lock = threading.Lock()
+
+    def one(code: str) -> None:
+        try:
+            outcome = backfill(code, months, today, market, force, progress)
+        except RuntimeError as exc:
+            with lock:
+                results[code] = (len(load_bars(code)), f"失敗：{exc}", 0)
+            return
+        with lock:
+            results[code] = outcome
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        list(pool.map(one, codes))
+
+    return results
 
 
 # --------------------------------------------------------------------------
@@ -560,6 +652,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--status", action="store_true", help="只顯示目前每檔的資料涵蓋範圍"
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=MAX_WORKERS,
+        help=f"同時抓幾檔（預設 {MAX_WORKERS}）。發送頻率仍由全域限制器控管",
     )
     parser.add_argument(
         "--force",
@@ -667,7 +765,8 @@ def main() -> int:
     # 第二次以後大部分月份會被跳過，預估數字會小很多。
     plan = {c: months_needed(c, args.months, force=args.force) for c in codes}
     total_months = sum(len(v) for v in plan.values())
-    probes = sum(1 for c in codes if plan[c] and args.market == "auto")
+    pending = [c for c in codes if plan[c]]
+    probes = len(pending) if args.market == "auto" else 0
 
     if total_months == 0:
         print("所有標的的歷史都已是最新，沒有需要連線抓的月份。")
@@ -679,44 +778,69 @@ def main() -> int:
                 print(f"  {code}: {start} ~ {end}  共 {count} 根")
         return 0
 
-    estimate = (total_months + probes) * POLITE_DELAY / 60
+    workers = max(1, min(args.workers, len(pending)))
+    requests_total = total_months + probes
+    # 發送頻率由全域限制器控管，所以總時間主要看「要送幾個請求 × 間隔」。
+    # 這個估計不再忽略網路延遲——延遲被併發蓋掉了，不再累加。
+    estimate = requests_total * POLITE_DELAY / 60
+
     print(
-        f"要抓 {total_months} 個月（{len(codes)} 檔），"
-        f"每次請求間隔 {POLITE_DELAY}s，預估約 {max(estimate, 0.1):.1f} 分鐘。"
+        f"要抓 {total_months} 個月（{len(pending)} 檔），"
+        f"{workers} 檔同時進行，每 {POLITE_DELAY}s 送出一個請求。"
     )
+    print(f"預估約 {max(estimate, 0.1):.1f} 分鐘（共 {requests_total} 個請求）。")
     already = args.months * len(codes) - total_months
     if already > 0:
         print(f"已經有資料的 {already} 個月會跳過。")
     print("每抓完一個月就存檔，中途 Ctrl+C 不會弄丟已抓到的部分。")
     print()
 
-    def show(code: str, year: int, month: int, count: int | None, error: str | None):
-        if error:
-            print(f"  {code} {year}-{month:02d}  失敗：{error}")
-        else:
-            print(f"  {code} {year}-{month:02d}  {count} 根", flush=True)
+    started = time.monotonic()
+    done = 0
+    counter_lock = threading.Lock()
 
+    def show(code: str, year: int, month: int, count: int | None, error: str | None):
+        nonlocal done
+        with counter_lock:
+            done += 1
+            seen = done
+        elapsed = time.monotonic() - started
+        rate = seen / elapsed if elapsed > 0 else 0
+        remain = (requests_total - seen) / rate if rate > 0 else 0
+        tail = f"  [{seen}/{requests_total}　剩約 {remain / 60:.1f} 分]"
+        if error:
+            print(f"  {code} {year}-{month:02d}  失敗：{error}{tail}", flush=True)
+        else:
+            print(f"  {code} {year}-{month:02d}  {count} 根{tail}", flush=True)
+
+    try:
+        results = backfill_many(
+            pending,
+            args.months,
+            market=args.market,
+            force=args.force,
+            workers=workers,
+            progress=show,
+        )
+    except KeyboardInterrupt:
+        print()
+        print("已中斷。已經抓到的月份都存好了，重跑會從缺的地方接下去。")
+        return 130
+
+    print()
     for code in codes:
-        if not plan[code]:
+        if code not in results:
             info = coverage(code)
             print(f"{code}: 已是最新（{info[2] if info else 0} 根）")
             continue
-        try:
-            count, market, fetched = backfill(
-                code,
-                args.months,
-                market=args.market,
-                force=args.force,
-                progress=show,
-            )
-        except RuntimeError as exc:
-            print(f"{code}: 失敗 —— {exc}")
-            continue
+        count, market_label, fetched = results[code]
         if count:
-            print(f"{code}: 共 {count} 根（{market}，這次抓了 {fetched} 個月）")
+            print(f"{code}: 共 {count} 根（{market_label}，這次抓了 {fetched} 個月）")
         else:
             print(f"{code}: 查無資料 —— 代號可能有誤，或這檔不在上市／上櫃")
-        print()
+
+    print()
+    print(f"總共花了 {(time.monotonic() - started) / 60:.1f} 分鐘。")
 
     return 0
 

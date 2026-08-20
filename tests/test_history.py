@@ -370,6 +370,106 @@ try:
 
     # ======================================================================
     print()
+    print("--- 發送頻率控管與併發 ---")
+    # ======================================================================
+    # 原本的寫法是「送出 → 等回應 → sleep → 下一個」，總時間會是
+    # 次數 ×（延遲 + 間隔）。端點慢的時候延遲才是大頭，
+    # 99 個月因此跑了八分多鐘而不是預估的 2.6 分鐘。
+    # 現在頻率由全域限制器控管、延遲用併發蓋掉，這兩條測試就是在確認
+    # 「變快了，但沒有對端點送得更密」。
+
+    import threading as _threading
+    import time as _time
+
+    limiter = history._RateLimiter(0.05)
+    stamps: list[float] = []
+    stamps_lock = _threading.Lock()
+
+    def hit() -> None:
+        limiter.wait()
+        with stamps_lock:
+            stamps.append(_time.monotonic())
+
+    threads = [_threading.Thread(target=hit) for _ in range(10)]
+    begin = _time.monotonic()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    elapsed = _time.monotonic() - begin
+
+    stamps.sort()
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    check(
+        "10 個請求分散在 4+ 個執行緒，仍照全域間隔排隊",
+        elapsed >= 9 * 0.05 * 0.9,
+        f"只花了 {elapsed:.3f}s，應至少 {9 * 0.05:.3f}s",
+    )
+    check(
+        "任兩個請求之間都有間隔（併發沒有讓發送變密）",
+        all(g >= 0.05 * 0.8 for g in gaps),
+        f"最小間隔 {min(gaps):.4f}s",
+    )
+    check(
+        "但也沒有比必要的更慢（沒有累加等待）",
+        elapsed < 9 * 0.05 * 2.5,
+        f"花了 {elapsed:.3f}s",
+    )
+
+    # --- 併發回補：用假的抓取函式，不連外網 ---
+    call_log: list[str] = []
+    log_lock = _threading.Lock()
+
+    def fake_fetch(code: str, year: int, month: int) -> list[Bar]:
+        _limiter_wait()
+        with log_lock:
+            call_log.append(f"{code}:{year}-{month:02d}")
+        _time.sleep(0.02)   # 假裝有網路延遲
+        return [bar(f"{year:04d}-{month:02d}-{day:02d}") for day in range(1, 21)]
+
+    _limiter_wait = history._limiter.wait
+    real_twse, real_detect = history.fetch_twse_month, history.detect_market
+    history.fetch_twse_month = fake_fetch
+    history.detect_market = lambda code, year, month: "twse"
+    try:
+        outcome = history.backfill_many(
+            ["AAA", "BBB", "CCC"], months=4, today=_date(2026, 8, 20), workers=3
+        )
+    finally:
+        history.fetch_twse_month, history.detect_market = real_twse, real_detect
+
+    check(
+        "三檔都回補完成",
+        set(outcome) == {"AAA", "BBB", "CCC"},
+        str(sorted(outcome)),
+    )
+    check(
+        "每檔各抓了 4 個月",
+        all(fetched == 4 for _, _, fetched in outcome.values()),
+        str(outcome),
+    )
+    check(
+        "資料真的寫進各自的檔案，沒有互相污染",
+        len(history.load_bars("AAA")) == 80
+        and len(history.load_bars("BBB")) == 80,
+        f"AAA {len(history.load_bars('AAA'))} 根、BBB {len(history.load_bars('BBB'))} 根",
+    )
+    check(
+        "同一檔的月份仍照順序抓（出錯時才知道是哪一段）",
+        [c.split(":")[1] for c in call_log if c.startswith("AAA")]
+        == ["2026-05", "2026-06", "2026-07", "2026-08"],
+        str([c for c in call_log if c.startswith("AAA")]),
+    )
+    check(
+        "回補完之後再跑一次，不會重抓已經抓齊的月份",
+        history.months_needed("AAA", 4, today=_date(2026, 8, 20))
+        == [(2026, 7), (2026, 8)],
+        str(history.months_needed("AAA", 4, today=_date(2026, 8, 20))),
+    )
+    check("空清單不會爆炸", history.backfill_many([], months=4) == {})
+
+    # ======================================================================
+    print()
     print("--- 從 data/raw/ 重建 ---")
     # ======================================================================
 
