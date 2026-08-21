@@ -46,9 +46,44 @@ app.secret_key = "local-only-investment-dashboard"  # 僅供 flash 訊息，非�
 REPORT_DIR = ROOT / "data" / "reports"
 
 
+def render_markdown(text: str) -> str | None:
+    """把報告的 Markdown 轉成 HTML；沒裝 markdown 套件就回 None。
+
+    回 None 而不是丟例外，是因為這個套件是後來才加的——
+    舊環境還沒 pip install 的話，報告頁應該退回純文字照常能看，
+    而不是整個儀表板開不起來。
+
+    報告是本機自己產生的檔案，不是使用者輸入，所以直接信任裡面的
+    HTML（報告本來就用了 <details> 來摺疊「今天為什麼沒進場」）。
+    """
+    try:
+        import markdown
+    except ModuleNotFoundError:
+        return None
+
+    return markdown.markdown(
+        text,
+        extensions=[
+            "tables",      # 報告的投組總覽、持股明細、觀察清單都是表格
+            "sane_lists",  # 沒有空行分隔就不把段落硬拆成清單
+        ],
+    )
+
+
 # --------------------------------------------------------------------------
 # 模板輔助
 # --------------------------------------------------------------------------
+
+@app.context_processor
+def inject_asset_version() -> dict:
+    """給 style.css 一個會跟著檔案變動的版本號。
+
+    沒有它的話，改完樣式要清瀏覽器快取才看得到——
+    這種「明明改了卻沒變」的狀況很難跟畫面上的錯誤區分開來。
+    """
+    css = Path(__file__).parent / "static" / "style.css"
+    return {"asset_version": int(css.stat().st_mtime) if css.exists() else 0}
+
 
 @app.template_filter("money")
 def fmt_money(value) -> str:
@@ -491,10 +526,12 @@ def history_report(trade_date: str):
     if not path.exists():
         flash(f"找不到 {trade_date} 的報告。", "error")
         return redirect(url_for("history"))
+    raw = path.read_text(encoding="utf-8")
     return render_template(
         "report_detail.html",
         trade_date=trade_date,
-        content=path.read_text(encoding="utf-8"),
+        content=raw,
+        content_html=render_markdown(raw),
     )
 
 

@@ -441,3 +441,75 @@ nav a.nav-paper.active { border-bottom-color: #b45309; }
   background: rgba(91, 141, 214, .07);
 }
 .card.onboard h2 { margin-top: 0; }
+
+/* ---------- 報告全文（Markdown 轉成的 HTML） ---------- */
+/* 這一段之前是直接把 .md 塞進 <pre>，結果 #、>、** 全部原樣印出來，
+   還套用了 1.7 的行高——每一行都變成一個獨立段落，非常難讀。
+   現在改成真的渲染，樣式盡量沿用上面既有的 table / 卡片語彙。 */
+
+.markdown-body { font-size: 14px; line-height: 1.65; }
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+
+.markdown-body h1 {
+  font-size: 19px; letter-spacing: -.01em;
+  margin: 0 0 16px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h2 {
+  font-size: 15px; margin: 28px 0 12px; padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.markdown-body h3 {
+  font-size: 14px; margin: 20px 0 8px; color: var(--text-dim);
+  font-weight: 600;
+}
+.markdown-body p { margin: 0 0 10px; }
+
+/* 報告用引言區塊放「目標」和「模擬倉是虛擬的」這種提醒，
+   沿用 .objective 的視覺語彙，讓它一眼就跟內文分開。 */
+.markdown-body blockquote {
+  margin: 0 0 14px; padding: 10px 14px;
+  background: var(--surface-2); border-left: 3px solid var(--accent);
+  border-radius: 6px; color: var(--text-dim);
+}
+.markdown-body blockquote p:last-child { margin-bottom: 0; }
+
+.markdown-body ul, .markdown-body ol { margin: 0 0 12px; padding-left: 22px; }
+.markdown-body li { margin: 3px 0; }
+.markdown-body li::marker { color: var(--text-dim); }
+
+/* 表格可能比版面寬（持股明細有 11 欄），讓它自己橫向捲，
+   而不是把整頁撐出水平捲軸。 */
+.markdown-body table {
+  display: block; width: max-content; max-width: 100%;
+  overflow-x: auto; margin: 0 0 14px;
+}
+.markdown-body th, .markdown-body td { white-space: nowrap; }
+
+.markdown-body hr {
+  border: 0; border-top: 1px solid var(--border); margin: 24px 0 14px;
+}
+
+.markdown-body em { color: var(--text-dim); font-style: normal; font-size: 13px; }
+.markdown-body strong { font-weight: 600; }
+
+.markdown-body code {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; font-size: 12.5px;
+}
+
+.markdown-body details {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px; margin: 0 0 14px;
+}
+.markdown-body details > summary {
+  cursor: pointer; color: var(--text-dim); font-size: 13px;
+}
+.markdown-body details[open] > summary { margin-bottom: 8px; }
+
+/* 沒裝 markdown 套件時的純文字退路 */
+.markdown-raw {
+  white-space: pre-wrap; word-break: break-word;
+  font-family: inherit; font-size: 14px; line-height: 1.55; margin: 0;
+}
