@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import tempfile
 from datetime import date as _date, timedelta as _timedelta
 from pathlib import Path

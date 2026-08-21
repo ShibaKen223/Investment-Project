@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import tempfile
 from datetime import date as _date
 from pathlib import Path

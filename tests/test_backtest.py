@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import random
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from datetime import date, timedelta
 from pathlib import Path
 
