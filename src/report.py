@@ -10,7 +10,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from datasource import Quote
-from portfolio import Evaluation, Signal
+from portfolio import Evaluation, Signal, objective_is_unset
+from strategy import exit_levels
 
 
 def _money(value: float | None) -> str:
@@ -134,19 +135,31 @@ def build_paper_section(paper_data: dict | None) -> list[str]:
     lines.append("")
 
     if account.positions:
-        lines.append("| 持股 | 股數 | 進場價 | 進場日 | 已抱 | 出場條件 |")
-        lines.append("| --- | ---: | ---: | --- | ---: | --- |")
+        lines.append("| 持股 | 股數 | 進場價 | 進場日 | 已抱 | 出場條件 | 停損基準 |")
+        lines.append("| --- | ---: | ---: | --- | ---: | --- | --- |")
         for code, pos in account.positions.items():
-            stop = pos.entry_price * (1 - params.stop_loss_pct / 100)
-            target = pos.entry_price * (1 + params.take_profit_pct / 100)
+            # 一定要走 exit_levels()，不要在這裡自己乘百分比——
+            # stop_mode 設成 atr 時停損寬度是看進場當下的 ATR，
+            # 報告如果自己算一套，印出來的線就會跟引擎實際在用的線不一樣。
+            stop, target, basis = exit_levels(
+                pos.entry_price, params, pos.entry_atr or None
+            )
             lines.append(
                 f"| {code} | {pos.shares:,} | {pos.entry_price:,.2f} | "
                 f"{pos.entry_date} | {pos.bars_held}/{params.max_hold_bars} 根 | "
-                f"停損 {stop:,.2f} ／ 停利 {target:,.2f} |"
+                f"停損 {stop:,.2f} ／ 停利 {target:,.2f} | {basis} |"
             )
         lines.append("")
 
     # --- 誠實提醒 ---
+    if paper_data.get("orphaned"):
+        lines.append(
+            "> ⚠️ 模擬倉還持有 "
+            f"{'、'.join(paper_data['orphaned'])}，但它們已經不在你的持股／觀察清單裡。"
+            "系統仍會繼續追蹤這些部位到出場為止，"
+            "不過「研究」頁不會再分析它們。"
+        )
+        lines.append("")
     if paper_data.get("warmup_short"):
         lines.append(
             f"> ⚠️ 這些標的歷史資料還不足 {params.warmup_bars} 根，"
@@ -178,7 +191,13 @@ def build_report(
 
     lines.append(f"# 投資日報 · {trade_date}")
     lines.append("")
-    lines.append(f"> **目標**：{objective.strip()}")
+    if objective_is_unset(objective):
+        lines.append(
+            "> **目標**：還沒設定。到儀表板的「規則設定」頁寫一句你自己在"
+            "最佳化什麼（要可量測），它就會印在這裡，每天提醒你一次。"
+        )
+    else:
+        lines.append(f"> **目標**：{objective.strip()}")
     lines.append("")
     lines.append(
         f"*行情日期 {trade_date} ｜ 產生時間 "

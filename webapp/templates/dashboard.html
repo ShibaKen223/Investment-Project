@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 
-{% if objective %}
+{% if objective_unset %}
+  {# 出廠預設值就別假裝那是你的目標——空白比一句沒人寫過的話誠實 #}
+  <div class="objective objective-unset">
+    <b>還沒設定你的投資目標</b>
+    這一行會印在每天報告的最上面，用來提醒你自己到底在最佳化什麼。
+    寫成一句可量測的話，例如「12 個月內做出可支配現金流，整體最大回撤不超過 15%」。
+    <a href="{{ url_for('settings') }}">現在去寫</a>
+  </div>
+{% elif objective %}
   <div class="objective"><b>目標</b>　{{ objective }}</div>
 {% endif %}
 
@@ -9,10 +17,40 @@
   <div class="warn-box">{{ w }}</div>
 {% endfor %}
 
+{# ---------- 自動更新狀態 ----------
+   「說明」頁承諾這套系統每天自己跑。這一段就是那個承諾的對帳單：
+   沒在跑的時候要講出來，不能讓畫面上還有數字就假裝一切正常。 #}
+{% if not schedule.installed %}
+  <div class="warn-box">
+    <b>自動更新沒有啟用。</b>
+    行情、報告、🧪 模擬倉都不會每天自己更新——你現在看到的是
+    {% if schedule.last_run %}
+      上次手動執行的結果（{{ schedule.last_run.strftime('%m/%d %H:%M') }}，{{ schedule.days_since }} 天前）。
+    {% else %}
+      系統還沒跑過任何一次的空狀態。
+    {% endif %}
+    請 Claude 幫你打開每日自動更新，之後每個交易日收盤後它就會自己跑。
+  </div>
+{% elif schedule.stale %}
+  <div class="warn-box">
+    自動更新已啟用，但
+    {% if schedule.last_run %}
+      距離上次成功執行已經 <b>{{ schedule.days_since }} 天</b>（{{ schedule.last_run.strftime('%m/%d %H:%M') }}）。
+      如果那幾天電腦在下午三點是關機的，這屬正常（開機不會補跑）；否則請 Claude 幫你檢查一下。
+    {% else %}
+      到目前為止<b>還沒有成功跑過任何一次</b>。
+      剛裝好的話，等下一個交易日下午三點就會有第一份紀錄；等過了還是這樣，請 Claude 幫你檢查一下。
+    {% endif %}
+  </div>
+{% endif %}
+
 <div class="card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
   <div class="meta">
     行情日期 <b>{{ trade_date }}</b>
     {% if fetched_at %}　·　資料抓取於 {{ fetched_at.strftime('%m/%d %H:%M') }}{% endif %}
+    {% if schedule.installed and not schedule.stale %}
+      　·　自動更新 <b class="ok-text">已啟用</b>{% if schedule.last_run %}，上次執行 {{ schedule.last_run.strftime('%m/%d %H:%M') }}{% endif %}
+    {% endif %}
   </div>
   <div class="spacer" style="flex:1"></div>
   <form method="post" action="{{ url_for('refresh') }}">

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ trade_date }} 報告 · 投資儀表板{% endblock %}
+{% block content %}
+
+<div class="card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+  <div class="meta"><a href="{{ url_for('history') }}">← 回歷史</a>　·　{{ trade_date }} 的完整報告</div>
+</div>
+
+<div class="card">
+  <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.7;margin:0">{{ content }}</pre>
+</div>
+
+{% endblock %}
