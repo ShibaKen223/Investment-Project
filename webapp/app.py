@@ -25,18 +25,14 @@ from flask import (  # noqa: E402
     url_for,
 )
 
+import monitor  # noqa: E402
 import research as research_mod  # noqa: E402
 import store  # noqa: E402
 from portfolio import (  # noqa: E402
     SIGNAL_LOG,
-    Evaluation,
-    Position,
     Rules,
     Signal,
-    evaluate,
-    load_peaks,
     objective_is_unset,
-    resolve_rules,
     summarize,
 )
 
@@ -209,54 +205,40 @@ def build_view(force_refresh: bool = False) -> dict:
             "可能是連假或資料源尚未更新——判讀訊號前請先確認。"
         )
 
-    # 部位
-    all_entries = positions_doc.get("positions") or []
-    open_positions: list[Position] = []
+    # 部位來源由 positions.yaml 的 source 決定（manual / engine / both）。
+    # 引擎部位的狀態直接讀 data/paper_state.json——網頁不跑引擎，
+    # 它只呈現引擎最後一次執行的結果，過期時 staleness_warning 會講。
+    mset = monitor.load(positions_doc)
+    warnings.extend(mset.warnings)
+    stale_engine = monitor.staleness_warning(mset.engine, trade_date)
+    if stale_engine:
+        warnings.append(stale_engine)
+
     closed_rows: list[dict] = []
-
-    for entry in all_entries:
-        code = str(entry.get("code")).strip()
-        position = Position(
-            code=code,
-            shares=int(entry["shares"]),
-            cost=float(entry["cost"]),
-            entry_date=str(entry["entry_date"]),
-            thesis=str(entry.get("thesis") or ""),
-            invalidate=str(entry.get("invalidate") or ""),
-            core=bool(entry.get("core", False)),
-            exit_date=entry.get("exit_date"),
-            exit_price=entry.get("exit_price"),
+    for position in mset.closed:
+        exit_price = float(position.exit_price or 0)
+        closed_rows.append(
+            {
+                "position": position,
+                "name": quotes[position.code].name
+                if position.code in quotes
+                else "—",
+                "exit_price": exit_price,
+                "realized": (exit_price - position.cost) * position.shares,
+                "realized_pct": (exit_price / position.cost - 1) * 100
+                if position.cost
+                else 0.0,
+            }
         )
-        if position.is_open:
-            open_positions.append(position)
-        else:
-            exit_price = float(position.exit_price or 0)
-            realized = (exit_price - position.cost) * position.shares
-            closed_rows.append(
-                {
-                    "position": position,
-                    "name": quotes[code].name if code in quotes else "—",
-                    "exit_price": exit_price,
-                    "realized": realized,
-                    "realized_pct": (exit_price / position.cost - 1) * 100
-                    if position.cost
-                    else 0.0,
-                }
-            )
 
-    peaks = load_peaks(open_positions)
+    evaluations, eval_warnings = monitor.evaluate_all(
+        mset, quotes, base_rules, overrides
+    )
+    warnings.extend(eval_warnings)
 
     rows: list[dict] = []
-    evaluations: list[Evaluation] = []
-    for position in open_positions:
-        rules = resolve_rules(base_rules, overrides, position.code)
-        quote = quotes.get(position.code)
-        if quote is None:
-            warnings.append(
-                f"{position.code} 查無當日行情——請確認代號是否正確，或該檔是否停牌。"
-            )
-        ev = evaluate(position, quote, rules, peak_price=peaks.get(position.code))
-        evaluations.append(ev)
+    for ev in evaluations:
+        quote = ev.quote
         rows.append(
             {
                 "ev": ev,
@@ -295,6 +277,11 @@ def build_view(force_refresh: bool = False) -> dict:
         "objective": objective,
         "objective_unset": objective_is_unset(objective),
         "rules": base_rules,
+        "source": mset.source,
+        "source_label": mset.source_label,
+        "read_only": mset.read_only,
+        "engine": mset.engine,
+        "pending_orders": mset.engine.pending,
         "trade_date": trade_date,
         "fetched_at": fetched_at,
         "warnings": warnings,
@@ -330,8 +317,29 @@ def refresh():
     return redirect(url_for("dashboard"))
 
 
+def _manual_edit_blocked() -> str | None:
+    """source=engine 時擋掉手動異動，並說清楚為什麼。
+
+    不擋的話這些表單還是會寫進 positions.yaml，只是畫面上完全不會變——
+    使用者會以為自己登記了一筆持股，實際上監控層根本沒在看那個檔案。
+    改壞資料還算好救，讓人以為做了某件事而其實沒有，救不回來。
+    """
+    source, _ = monitor.resolve_source(store.load_positions_doc())
+    if source != monitor.SOURCE_ENGINE:
+        return None
+    return (
+        "目前監控的是程式交易引擎的部位（config/positions.yaml 的 "
+        "source: engine），手動持股不會顯示在畫面上，所以這裡先擋下來。"
+        "要手動管理持股請把 source 改回 manual 或 both。"
+    )
+
+
 @app.post("/position/add")
 def position_add():
+    blocked = _manual_edit_blocked()
+    if blocked:
+        flash(blocked, "error")
+        return redirect(url_for("dashboard"))
     form = request.form
     try:
         store.add_position(
@@ -351,6 +359,10 @@ def position_add():
 
 @app.post("/position/exit")
 def position_exit():
+    blocked = _manual_edit_blocked()
+    if blocked:
+        flash(blocked, "error")
+        return redirect(url_for("dashboard"))
     form = request.form
     try:
         store.exit_position(
@@ -372,6 +384,10 @@ def position_exit():
 
 @app.post("/position/update")
 def position_update():
+    blocked = _manual_edit_blocked()
+    if blocked:
+        flash(blocked, "error")
+        return redirect(url_for("dashboard"))
     form = request.form
     try:
         store.update_position(
@@ -611,12 +627,15 @@ def help_page():
     account_params = paper.AccountParams.from_dict(config.get("account"))
     universe_codes = history.universe_from_config()
 
+    source, _ = monitor.resolve_source(store.load_positions_doc())
+
     return render_template(
         "help.html",
         paper_enabled=paper_enabled,
         params=params,
         account_params=account_params,
         universe_count=len(universe_codes),
+        source=source,
     )
 
 

@@ -72,17 +72,44 @@
 </div>
 
 <div class="card">
-  <h2>真實持股跟模擬倉，到底什麼關係</h2>
-  <p>
-    這是<b>兩本完全獨立的帳</b>，模擬倉的輸贏不會影響你的真實持股數字，反過來也一樣。
-  </p>
+  <h2>「今日」頁在監控誰</h2>
+  {% if source == 'engine' %}
+    <p>
+      你目前設定的是 <code>source: engine</code>——
+      「今日」頁監控的就是<b>程式交易引擎自己持有的部位</b>，
+      不是你手動登記的持股。引擎買了什麼、成本多少、什麼時候會賣，
+      畫面上看到的都直接來自它的部位帳本，你不需要手動登記任何東西。
+    </p>
+    <p class="footnote">
+      這個設定在 <code>config/positions.yaml</code> 最上面的 <code>source</code>：
+      <code>manual</code>（只看你手動登記的持股）、
+      <code>engine</code>（只看引擎的部位，目前）、
+      <code>both</code>（兩邊都看，各自標示來源）。
+      在 engine 模式下，「持股異動」的表單會被停用——
+      因為改了也不會顯示在畫面上，留著只會讓人以為登記成功了。
+    </p>
+    <p>
+      下面這張表講的是<b>兩種來源的差別</b>：
+    </p>
+  {% else %}
+    <p>
+      這是<b>兩本完全獨立的帳</b>，模擬倉的輸贏不會影響你的真實持股數字，反過來也一樣。
+    </p>
+    <p class="footnote">
+      想讓「今日」頁直接監控引擎的部位（不必每次成交都手動登記），
+      把 <code>config/positions.yaml</code> 最上面的 <code>source</code>
+      改成 <code>engine</code> 就好。
+    </p>
+  {% endif %}
   <div class="table-scroll">
     <table>
-      <thead><tr><th></th><th>真實持股（「今日」頁）</th><th>🧪 模擬倉</th></tr></thead>
+      <thead><tr><th></th><th>手動登記的持股</th><th>🧪 程式交易引擎的部位</th></tr></thead>
       <tbody>
         <tr><td><b>錢</b></td><td>你自己登記的真實成本</td><td>系統自己開的虛擬 {{ account_params.initial_cash | money }}，跟你的錢無關</td></tr>
         <tr><td><b>誰決定買什麼</b></td><td>你自己手動登記</td><td>系統自動選</td></tr>
         <tr><td><b>系統做什麼</b></td><td>只比對停損停利、負責提醒你——不會幫你選股，因為你已經買了</td><td>自動選股、自動進場、自動出場，全部自己跑</td></tr>
+        <tr><td><b>停損線怎麼算</b></td><td>「規則設定」頁的百分比（成本價或移動高點起算）</td><td>引擎自己的規則：{% if params.uses_atr %}進場價 ± {{ params.atr_stop_multiple }}×進場當下的 ATR{% else %}進場價 ± {{ params.stop_loss_pct }}% / {{ params.take_profit_pct }}%{% endif %}，另有抱滿 {{ params.max_hold_bars }} 根 K 線的時間出場</td></tr>
+        <tr><td><b>觸發之後</b></td><td>系統只提醒，下不下單由你決定</td><td>引擎在下一個交易日開盤自己執行，不需要你確認</td></tr>
       </tbody>
     </table>
   </div>
@@ -418,9 +445,14 @@
   <details class="faq">
     <summary>它可以自動幫我下單嗎？</summary>
     <p>
-      不行，而且目前<b>刻意</b>不做。<br>
-      現在最壞的情況是報告數字算錯；接上自動下單之後，最壞的情況是資金真的沒了。
-      要往那個方向走，正確的順序是先看幾個月模擬倉的績效——
+      不行，而且目前<b>刻意</b>不做。<b>沒有連接任何券商，不會送出任何真實委託。</b><br>
+      引擎的「自動進出場」全部發生在它自己的帳本裡（<code>data/paper_state.json</code>），
+      成交價是模擬出來的。<code>source: engine</code> 只是讓「今日」頁改成監控那本帳，
+      不代表有任何一張單真的送出去。
+    </p>
+    <p>
+      現在最壞的情況是報告數字算錯；接上真實下單之後，最壞的情況是資金真的沒了。
+      要往那個方向走，正確的順序是先看幾個月模擬績效——
       如果一套規則在模擬倉都賺不到錢，接真錢只是賠得比較快。
     </p>
   </details>

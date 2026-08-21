@@ -436,6 +436,21 @@ nav a.nav-paper.active { border-bottom-color: #b45309; }
 }
 
 /* 還沒有持股時的入門卡片 */
+/* 監控來源是程式交易引擎時的橫幅。用跟模擬倉頁同一組橘色，
+   讓「這一區的東西是引擎在管的」在兩個頁面上是同一個視覺語言。 */
+.card.engine-banner {
+  border-left: 3px solid #d08a3e;
+  background: rgba(208, 138, 62, .07);
+}
+.card.engine-banner h2 { margin-top: 0; }
+
+.order-list { list-style: none; padding: 0; margin: 10px 0 0; }
+.order-list li {
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.order-list li:last-child { border-bottom: 0; }
+
 .card.onboard {
   border-left: 3px solid #5b8dd6;
   background: rgba(91, 141, 214, .07);
