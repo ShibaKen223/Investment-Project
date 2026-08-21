@@ -24,12 +24,12 @@
   {% if reports %}
     <div class="table-scroll">
     <table>
-      <thead><tr><th>交易日</th><th>檔案</th></tr></thead>
+      <thead><tr><th>交易日</th><th>內容</th></tr></thead>
       <tbody>
       {% for d in reports %}
         <tr>
-          <td class="code">{{ d }}</td>
-          <td class="name">data/reports/{{ d }}.md</td>
+          <td class="code"><a href="{{ url_for('history_report', trade_date=d) }}">{{ d }}</a></td>
+          <td class="name">當天的完整報告，內含 <span class="pill auto">🧪 模擬倉</span> 決策說明</td>
         </tr>
       {% endfor %}
       </tbody>

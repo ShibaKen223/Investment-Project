@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}模擬倉 · 投資儀表板{% endblock %}
+{% block content %}
+
+<div class="virtual-banner">🧪 模擬倉・以下全部是虛擬資金，不是你的真錢</div>
+
+{% if broken %}
+<div class="card paper-intro">
+  <h2>🧪 模擬倉暫停中</h2>
+  <p class="lead" style="margin-bottom:10px">{{ broken }}</p>
+  <p class="footnote" style="margin-bottom:0">
+    你的<b>真實持股監控完全不受影響</b>——「<a href="{{ url_for('dashboard') }}">今日</a>」頁
+    照常運作，停損停利提醒也照常。這裡壞掉的只是那個虛擬帳戶的紀錄檔。
+  </p>
+</div>
+
+{% elif not enabled %}
+<div class="card paper-intro">
+  <h2>🧪 模擬倉目前是關閉的</h2>
+  <p class="lead" style="margin-bottom:10px">
+    模擬倉是系統用<b>虛擬 100 萬</b>照波段規則自己買賣的一個帳戶，不是你的真錢，也不需要你操作。
+    現在沒開，所以這頁沒有東西可以看。
+  </p>
+  <p class="footnote" style="margin-bottom:0">
+    想打開它：這是系統內部的一個開關，不用自己找檔案改——
+    直接請 Claude 幫你打開模擬倉就好，打開後系統下一次自動執行時就會開始下第一筆委託。
+    詳細概念看「<a href="{{ url_for('help_page') }}">說明</a>」頁的「最容易搞混的一件事」那張卡片。
+  </p>
+</div>
+{% else %}
+
+<div class="card paper-intro">
+  <h2>這頁怎麼用 <span class="pill auto">全自動</span></h2>
+  <p style="margin:0 0 10px">
+    <b>你不用在這頁做任何操作。</b>模擬倉照系統裡設定好的規則自己決定買賣，
+    這頁只負責讓你「看」它做了什麼決定——底下沒有任何下單按鈕，因為模擬倉根本不接受你手動下單。
+  </p>
+  <ul style="margin:0 0 6px;padding-left:20px;line-height:1.8;font-size:14px">
+    <li><b>它什麼時候動作</b>：系統每天自動執行一次，用當天收盤決定「明日開盤要下什麼單」，
+      下一次自動執行時再用開盤價成交。</li>
+    <li><b>想改規則</b>（資金、每檔投入比例、停損停利、進場條件）：這些是系統內部設定，
+      一般不需要自己動手——想調整的話請 Claude 幫你改，改動也會自動留下紀錄可以查。</li>
+    <li><b>想關掉</b>：一樣請 Claude 幫你關掉即可，不用自己找檔案。</li>
+  </ul>
+  <p class="footnote" style="margin-bottom:0">
+    模擬倉的錢是假的，目的是先看幾個月「這套規則實際會做什麼」，再決定要不要用真錢照著做。
+    {% if latest_report %}想看某天完整的決策說明（含「為什麼其他標的沒進場」），
+    去<a href="{{ url_for('history_report', trade_date=latest_report) }}">最新一份報告</a>。{% endif %}
+  </p>
+</div>
+
+<div class="stats stats-virtual">
+  <div class="stat"><div class="k">目前淨值</div><div class="v">{{ equity_now | money }}</div></div>
+  <div class="stat">
+    <div class="k">累計報酬</div>
+    <div class="v {{ 'up' if stats.total_return_pct >= 0 else 'down' }}">{{ stats.total_return_pct | pct }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">最大回撤</div>
+    <div class="v down">{{ stats.max_drawdown_pct | pct }}</div>
+  </div>
+  <div class="stat"><div class="k">持有檔數</div><div class="v">{{ holdings | length }} / {{ account_params.max_positions }}</div></div>
+  <div class="stat"><div class="k">現金</div><div class="v">{{ account.cash | money }}</div></div>
+  <div class="stat">
+    <div class="k">完成交易</div>
+    <div class="v">{{ stats.trades }} 筆<span style="font-size:14px;color:var(--text-dim)">（勝率 {{ '%.0f' | format(stats.win_rate) }}%）</span></div>
+  </div>
+</div>
+<div style="height:18px"></div>
+
+<div class="card">
+  <h2>淨值走勢 <span class="hint">{% if equity_curve %}{{ equity_curve[0].trade_date }} 起，最新 {{ equity_curve[-1].trade_date }}{% endif %}</span></h2>
+  {% if sparkline %}
+    {{ sparkline | safe }}
+  {% else %}
+    <p class="empty-note">還沒有累積到兩天以上的淨值紀錄，跑幾天之後這裡會出現走勢線。</p>
+  {% endif %}
+  {% if stats.trades > 0 and stats.trades < 30 %}
+    <p class="footnote" style="margin-top:10px">
+      ⚠️ 目前只有 {{ stats.trades }} 筆完成交易，樣本太小，勝率與報酬還不具統計意義——先累積到 30～50 筆再參考。
+    </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>目前持股</h2>
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>代號</th><th>名稱</th>
+        <th class="num">股數</th><th class="num">進場價</th><th>進場日</th>
+        <th class="num">現價</th><th class="num">未實現</th>
+        <th class="num">停損線</th><th class="num">停利線</th>
+        <th class="num">已抱</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for h in holdings %}
+      <tr>
+        <td class="code">{{ h.code }}</td>
+        <td class="name">{{ h.name }}</td>
+        <td class="num">{{ h.pos.shares }}</td>
+        <td class="num">{{ h.pos.entry_price | price }}</td>
+        <td class="name">{{ h.pos.entry_date }}</td>
+        <td class="num">{{ h.current_price | price }}</td>
+        <td class="num {{ 'up' if h.unrealized >= 0 else 'down' }}">
+          {{ h.unrealized | money }}（{{ h.unrealized_pct | pct }}）
+        </td>
+        <td class="num" title="{{ h.basis }}">{{ h.stop | price }}</td>
+        <td class="num">{{ h.target | price }}</td>
+        <td class="num">{{ h.pos.bars_held }}/{{ params.max_hold_bars }} 根</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="empty-note">目前沒有任何持股，等進場條件成立才會買。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>明日開盤委託 <span class="hint">已經決定，下次開盤自動送出——不用你按任何東西</span></h2>
+  {% if pending %}
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>代號</th><th>方向</th><th class="num">股數</th><th>理由</th><th>決定於</th></tr></thead>
+    <tbody>
+    {% for o in pending %}
+      <tr>
+        <td class="code">{{ o.code }}</td>
+        <td><span class="pill {{ 'sig-profit' if o.side == 'BUY' else 'sig-stop' }}">{{ '買進' if o.side == 'BUY' else '賣出' }}</span></td>
+        <td class="num">{{ o.shares }}</td>
+        <td class="name">{{ o.detail or o.reason }}</td>
+        <td class="name">{{ o.decided_on }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <p class="empty-note">目前沒有待執行的委託。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>交易紀錄 <span class="hint">最近 {{ trades | length }} 筆，最新的在最上面</span></h2>
+  {% if trades %}
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>代號</th><th>進場</th><th class="num">進場價</th>
+        <th>出場</th><th class="num">出場價</th>
+        <th class="num">淨損益</th><th>出場原因</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td class="code">{{ t.code }}</td>
+        <td class="name">{{ t.entry_date }}</td>
+        <td class="num">{{ t.entry_price | price }}</td>
+        <td class="name">{{ t.exit_date }}</td>
+        <td class="num">{{ t.exit_price | price }}</td>
+        <td class="num {{ 'up' if t.net_pnl >= 0 else 'down' }}">
+          {{ t.net_pnl | money }}（{{ t.net_pnl_pct | pct }}）
+        </td>
+        <td class="name">{{ t.exit_detail or t.exit_reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <p class="empty-note">還沒有任何完成的來回交易。</p>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

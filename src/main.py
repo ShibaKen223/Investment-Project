@@ -30,10 +30,12 @@ import datasource  # noqa: E402
 import paperdaily  # noqa: E402
 import report as report_mod  # noqa: E402
 from portfolio import (  # noqa: E402
+    SIGNAL_LOG,
     Evaluation,
     Position,
     Rules,
     evaluate,
+    load_peaks,
     resolve_rules,
     summarize,
 )
@@ -43,7 +45,6 @@ CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 REPORT_DIR = DATA_DIR / "reports"
-SIGNAL_LOG = DATA_DIR / "signals.jsonl"
 
 
 def load_yaml(path: Path) -> dict:
@@ -71,28 +72,6 @@ def load_positions(raw: dict) -> tuple[list[Position], list[dict]]:
         )
     watchlist = list(raw.get("watchlist") or [])
     return positions, watchlist
-
-
-def load_peaks(codes: set[str]) -> dict[str, float]:
-    """從歷史訊號紀錄取出每檔的進場後最高收盤價（移動停損用）。"""
-    peaks: dict[str, float] = {}
-    if not SIGNAL_LOG.exists():
-        return peaks
-    with SIGNAL_LOG.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            for item in record.get("positions", []):
-                code = item.get("code")
-                close = item.get("close")
-                if code in codes and isinstance(close, (int, float)):
-                    peaks[code] = max(peaks.get(code, 0.0), float(close))
-    return peaks
 
 
 def append_signal_log(record: dict) -> None:
@@ -170,7 +149,7 @@ def main() -> int:
     all_positions, watchlist_cfg = load_positions(positions_cfg)
     positions = [p for p in all_positions if p.is_open]
     if not positions:
-        warnings.append("positions.yaml 沒有任何未出場的持股。")
+        warnings.append("目前沒有登記任何未出場的持股。")
 
     if not args.quiet:
         print("抓取全市場收盤行情…", file=sys.stderr)
@@ -184,7 +163,7 @@ def main() -> int:
             "可能是連假，或資料源尚未更新——判讀訊號前請先確認。"
         )
 
-    peaks = load_peaks({p.code for p in positions})
+    peaks = load_peaks(positions)
 
     evaluations: list[Evaluation] = []
     for position in positions:

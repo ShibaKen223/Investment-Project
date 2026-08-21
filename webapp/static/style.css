@@ -193,6 +193,10 @@ th.num, td.num { text-align: right; }
   font-size: 14px; margin-bottom: 12px;
 }
 
+/* 「正常運作中」的字。刻意用 accent 藍而不是綠——
+   這個系統的綠色是「跌」，拿它當 OK 會讓人看錯。 */
+.ok-text { color: var(--accent); font-weight: 600; }
+
 .thesis-item { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .thesis-item:last-child { border-bottom: 0; }
 .thesis-item .t { font-size: 14px; margin: 4px 0; }
@@ -356,6 +360,72 @@ th.num, td.num { text-align: right; }
   padding-left: 14px;
   line-height: 1.8;
   border-left: 2px solid rgba(127, 127, 127, .25);
+}
+
+/* ---------- 模擬倉頁 ---------- */
+.sparkline { width: 100%; height: 90px; display: block; }
+.card.paper-intro {
+  border-left: 3px solid #d08a3e;
+  background: rgba(208, 138, 62, .07);
+}
+.card.paper-intro h2 { margin-top: 0; }
+.pill.auto { background: rgba(208, 138, 62, .16); color: #b45309; }
+@media (prefers-color-scheme: dark) {
+  .pill.auto { background: rgba(251, 191, 36, .16); color: #fbbf24; }
+}
+
+/* 模擬倉：整頁都用一致的琥珀色標示「這是虛擬帳戶」，跟其他頁面拉開視覺區隔 */
+.virtual-banner {
+  background: rgba(208, 138, 62, .12); border: 1px solid rgba(208, 138, 62, .3);
+  color: #b45309; font-size: 13px; font-weight: 600;
+  padding: 8px 14px; border-radius: 8px; margin-bottom: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  .virtual-banner {
+    background: rgba(251, 191, 36, .1); border-color: rgba(251, 191, 36, .28);
+    color: #fbbf24;
+  }
+}
+.stats.stats-virtual .stat { border-top: 3px solid #d08a3e; }
+@media (prefers-color-scheme: dark) {
+  .stats.stats-virtual .stat { border-top-color: #fbbf24; }
+}
+
+/* ---------- 操作流程圖（說明頁） ---------- */
+.flow { display: flex; flex-direction: column; align-items: stretch; }
+.flow-step {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+}
+.flow-step .flow-icon { font-size: 22px; line-height: 1; }
+.flow-step b { display: block; font-size: 14.5px; margin-bottom: 4px; }
+.flow-step p { margin: 0; font-size: 13.5px; color: var(--text-dim); line-height: 1.6; }
+.flow-step.flow-you { border-left: 3px solid var(--accent); }
+.flow-step.flow-end { border-left: 3px solid var(--text-dim); }
+.flow-arrow {
+  text-align: center; color: var(--text-dim); font-size: 13px;
+  padding: 8px 0; font-weight: 500;
+}
+.flow-lanes { margin: 0; }
+.flow-lane {
+  border-radius: 10px; padding: 14px 16px; border: 1px solid var(--border);
+}
+.flow-lane h3 { margin: 0 0 8px; font-size: 14.5px; }
+.flow-lane .help-steps { margin: 0; font-size: 13.5px; }
+.flow-lane-real { border-left: 3px solid var(--accent); background: rgba(37, 99, 235, .05); }
+.flow-lane-virtual { border-left: 3px solid #d08a3e; background: rgba(208, 138, 62, .07); }
+@media (prefers-color-scheme: dark) {
+  .flow-lane-real { background: rgba(96, 165, 250, .07); }
+  .flow-lane-virtual { background: rgba(251, 191, 36, .08); border-left-color: #fbbf24; }
+}
+
+nav a.nav-paper { color: #b45309; }
+nav a.nav-paper:hover { filter: brightness(1.15); }
+nav a.nav-paper.active { border-bottom-color: #b45309; }
+@media (prefers-color-scheme: dark) {
+  nav a.nav-paper { color: #fbbf24; }
+  nav a.nav-paper.active { border-bottom-color: #fbbf24; }
 }
 
 /* 還沒有持股時的入門卡片 */

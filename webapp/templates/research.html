@@ -13,14 +13,14 @@
   </p>
   {% if not has_benchmark %}
     <div class="warn-box">
-      找不到 0050 或 006208 的歷史日 K，因此無法計算「相對大盤強弱」。
-      在終端機執行 <code>python3 src/history.py --codes 006208 --months 24</code> 就會出現。
+      還沒有大盤 ETF（0050 或 006208）的歷史資料，因此無法計算「相對大盤強弱」。
+      請 Claude 幫你把大盤的歷史補進來，這一欄就會出現。
     </div>
   {% endif %}
   {% if missing %}
     <div class="warn-box">
-      這些標的還沒有歷史日 K：{{ missing|join('、') }}。
-      執行 <code>python3 src/history.py --months 24</code> 補齊後重新整理。
+      這些標的還沒有足夠的歷史資料：{{ missing|join('、') }}。
+      系統每天執行時會慢慢累積，想馬上補齊過去兩年的話，請 Claude 幫你補一次就好。
     </div>
   {% endif %}
 </div>
@@ -44,7 +44,7 @@
         <div class="warn-box">
           <b>這檔的歷史中間缺了 {{ item.gap_months }} 個月。</b>
           缺掉的期間算不出報酬，下表會顯示「—」而不是給你一個標錯期間的數字。
-          在終端機執行 <code>python3 src/history.py --fill-gaps</code> 補起來。
+          請 Claude 幫你把缺掉的月份補起來就會恢復正常。
         </div>
       {% endif %}
 
@@ -104,13 +104,13 @@
         <p class="footnote">
           這一段是人工整理的靜態知識，<b>會過時</b>。
           它寫的是變化很慢的商業模式，不是財測或目標價。
-          要修改請編輯 <code>config/sectors.yaml</code>。
+          內容不對或想補充，請 Claude 幫你改。
         </p>
       {% else %}
         <h3>這家公司在做什麼</h3>
         <p class="empty-note">
-          <code>config/sectors.yaml</code> 裡還沒有 {{ item.code }} 的資料。
-          照檔案裡的格式補一筆就會出現在這裡。
+          系統的產業資料庫裡還沒有 {{ item.code }}。
+          請 Claude 幫你補一筆，之後這裡就會有內容。
         </p>
       {% endif %}
 
@@ -164,7 +164,7 @@
       {% endfor %}
     {% else %}
       <p class="empty-note">
-        辭典裡沒有「{{ query }}」。可以自己加進 <code>config/glossary.yaml</code>。
+        辭典裡沒有「{{ query }}」。請 Claude 幫你把這個詞加進辭典，下次就查得到。
       </p>
     {% endif %}
   {% else %}

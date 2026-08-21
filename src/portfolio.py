@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
+from pathlib import Path
 
 from datasource import Quote
+
+ROOT = Path(__file__).resolve().parent.parent
+SIGNAL_LOG = ROOT / "data" / "signals.jsonl"
 
 
 class Signal(str, Enum):
@@ -137,6 +142,43 @@ class Evaluation:
         return (self.target_price / self.quote.close - 1) * 100
 
 
+def load_peaks(positions: list[Position]) -> dict[str, float]:
+    """每個部位「進場之後」的最高收盤價，移動停損（stop_basis=trailing）用。
+
+    一定要用 entry_date 切，不能整份掃過去取最大值：
+    signals.jsonl 是 append-only 的全歷史，同一個代號裡面可能混著
+    這次進場**之前**的價格，甚至上一輪早就出場的那個部位的價格。
+    拿那種高點當移動停損的基準，停損線會被莫名其妙地往上拉，
+    而畫面上只會看到一條「不知道為什麼這麼高」的停損線。
+
+    ISO 日期字串直接比大小就是時間順序，不用轉 datetime。
+    """
+    entry_dates = {p.code: p.entry_date for p in positions}
+    if not entry_dates or not SIGNAL_LOG.exists():
+        return {}
+
+    peaks: dict[str, float] = {}
+    with SIGNAL_LOG.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            trade_date = str(record.get("trade_date") or "")
+            for item in record.get("positions", []):
+                code = item.get("code")
+                entry_date = entry_dates.get(code)
+                if entry_date is None or trade_date < entry_date:
+                    continue
+                close = item.get("close")
+                if isinstance(close, (int, float)):
+                    peaks[code] = max(peaks.get(code, 0.0), float(close))
+    return peaks
+
+
 def resolve_rules(base: Rules, overrides: dict[str, dict], code: str) -> Rules:
     """套用個股例外規則。未列出的個股回傳原本的 rules。"""
     override = overrides.get(code)
@@ -198,7 +240,7 @@ def evaluate(
         )
 
     if position.holding_days(today) < 0:
-        ev.notes.append("進場日在未來，請檢查 positions.yaml。")
+        ev.notes.append("進場日在未來，請確認登記的進場日期有沒有打錯。")
 
     return ev
 
