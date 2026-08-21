@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 
-{% if objective %}
+{% if objective_unset %}
+  {# 出廠預設值就別假裝那是你的目標——空白比一句沒人寫過的話誠實 #}
+  <div class="objective objective-unset">
+    <b>還沒設定你的投資目標</b>
+    這一行會印在每天報告的最上面，用來提醒你自己到底在最佳化什麼。
+    寫成一句可量測的話，例如「12 個月內做出可支配現金流，整體最大回撤不超過 15%」。
+    <a href="{{ url_for('settings') }}">現在去寫</a>
+  </div>
+{% elif objective %}
   <div class="objective"><b>目標</b>　{{ objective }}</div>
 {% endif %}
 
@@ -9,10 +17,40 @@
   <div class="warn-box">{{ w }}</div>
 {% endfor %}
 
+{# ---------- 自動更新狀態 ----------
+   「說明」頁承諾這套系統每天自己跑。這一段就是那個承諾的對帳單：
+   沒在跑的時候要講出來，不能讓畫面上還有數字就假裝一切正常。 #}
+{% if not schedule.installed %}
+  <div class="warn-box">
+    <b>自動更新沒有啟用。</b>
+    行情、報告、🧪 模擬倉都不會每天自己更新——你現在看到的是
+    {% if schedule.last_run %}
+      上次手動執行的結果（{{ schedule.last_run.strftime('%m/%d %H:%M') }}，{{ schedule.days_since }} 天前）。
+    {% else %}
+      系統還沒跑過任何一次的空狀態。
+    {% endif %}
+    請 Claude 幫你打開每日自動更新，之後每個交易日收盤後它就會自己跑。
+  </div>
+{% elif schedule.stale %}
+  <div class="warn-box">
+    自動更新已啟用，但
+    {% if schedule.last_run %}
+      距離上次成功執行已經 <b>{{ schedule.days_since }} 天</b>（{{ schedule.last_run.strftime('%m/%d %H:%M') }}）。
+      如果那幾天電腦在下午三點是關機的，這屬正常（開機不會補跑）；否則請 Claude 幫你檢查一下。
+    {% else %}
+      到目前為止<b>還沒有成功跑過任何一次</b>。
+      剛裝好的話，等下一個交易日下午三點就會有第一份紀錄；等過了還是這樣，請 Claude 幫你檢查一下。
+    {% endif %}
+  </div>
+{% endif %}
+
 <div class="card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
   <div class="meta">
     行情日期 <b>{{ trade_date }}</b>
     {% if fetched_at %}　·　資料抓取於 {{ fetched_at.strftime('%m/%d %H:%M') }}{% endif %}
+    {% if schedule.installed and not schedule.stale %}
+      　·　自動更新 <b class="ok-text">已啟用</b>{% if schedule.last_run %}，上次執行 {{ schedule.last_run.strftime('%m/%d %H:%M') }}{% endif %}
+    {% endif %}
   </div>
   <div class="spacer" style="flex:1"></div>
   <form method="post" action="{{ url_for('refresh') }}">
@@ -20,8 +58,45 @@
   </form>
 </div>
 
+{# ---------- 監控來源：不是手動登記時一定要講清楚在看誰 ---------- #}
+{% if source != 'manual' %}
+<div class="card engine-banner">
+  <h2>監控對象：{{ source_label }}</h2>
+  <p class="lead" style="margin-bottom:8px">
+    下面的部位、成本與停損停利線都直接來自<b>程式交易引擎的部位帳本</b>，
+    不是手動登記的資料。引擎自己決定進出場，你不需要為這些部位下單。
+  </p>
+  <p class="footnote" style="margin-bottom:0">
+    停損停利價用的是<b>引擎自己的出場規則</b>（<code>config/paper.yaml</code> 的 strategy 那一段），
+    跟「<a href="{{ url_for('settings') }}">規則設定</a>」頁的百分比不一樣是正常的——
+    那一組是給手動持股用的。
+    {% if engine.last_date %}引擎最後執行到 <b>{{ engine.last_date }}</b>。{% endif %}
+  </p>
+</div>
+
+{% if pending_orders %}
+<div class="card">
+  <h2>引擎的明日開盤委託 <span class="hint">今天收盤決定，下一個交易日開盤成交</span></h2>
+  <ul class="order-list">
+    {% for o in pending_orders %}
+      <li>
+        <span class="pill {{ 'sig-stop' if o.side == 'SELL' else 'sig-profit' }}">
+          {{ '賣出' if o.side == 'SELL' else '買進' }}
+        </span>
+        <b class="code">{{ o.code }}</b> {{ '{:,}'.format(o.shares) }} 股
+        —— {{ o.detail or o.reason or '—' }}
+      </li>
+    {% endfor %}
+  </ul>
+  <p class="footnote" style="margin-bottom:0">
+    這些是引擎已經排定的動作，不需要你確認。它們仍然是虛擬成交，不會送出真實委託。
+  </p>
+</div>
+{% endif %}
+{% endif %}
+
 {# ---------- 還沒有持股：先講該怎麼開始，而不是丟一堆空表格 ---------- #}
-{% if not rows %}
+{% if not rows and source == 'manual' %}
 <div class="card onboard">
   <h2>還沒有登記任何持股</h2>
   <p class="lead" style="margin-bottom:10px">
@@ -44,6 +119,21 @@
     第一次用建議先看
     <a href="{{ url_for('help_page') }}"><b>說明</b></a>，
     三分鐘就能搞懂這套系統在做什麼、不做什麼。
+  </p>
+</div>
+{% endif %}
+
+{% if not rows and source != 'manual' %}
+<div class="card onboard">
+  <h2>引擎目前沒有持有任何部位</h2>
+  <p class="lead" style="margin-bottom:10px">
+    這是正常的起始狀態，也可能是它今天判斷「沒有標的符合進場條件」。
+    引擎只在四個條件同時成立時才進場，空手的日子本來就比較多。
+  </p>
+  <p class="footnote" style="margin-bottom:0">
+    想知道今天為什麼沒買，看
+    <a href="{{ url_for('paper_page') }}"><b>模擬倉</b></a> 頁的「其他標的今天為什麼沒進場」。
+    引擎能買的範圍來自最下面的<b>觀察清單</b>，清單是空的它就無事可做。
   </p>
 </div>
 {% endif %}
@@ -73,17 +163,29 @@
         </p>
         <p class="why">
           規則判定：<b>{% if ev.signal.value == 'STOP_LOSS' %}停損出場{% else %}停利出場{% endif %}</b>
-          —— 系統只負責計算與提醒，下單與否由你決定。
+          {% if ev.position.is_engine %}
+            —— 這是引擎的部位，它會在下一個交易日開盤自動執行，你不需要做什麼。
+          {% else %}
+            —— 系統只負責計算與提醒，下單與否由你決定。
+          {% endif %}
         </p>
-        {% if ev.position.invalidate %}
-          <p class="why">當初設定的認錯條件：{{ ev.position.invalidate }}</p>
+        {% if ev.basis_label %}
+          <p class="why">停損基準：{{ ev.basis_label }}</p>
         {% endif %}
+        {% if ev.position.invalidate %}
+          <p class="why">{{ '出場條件' if ev.position.is_engine else '當初設定的認錯條件' }}：{{ ev.position.invalidate }}</p>
+        {% endif %}
+        {% for note in ev.notes %}
+          <p class="why">{{ note }}</p>
+        {% endfor %}
       </div>
     {% endfor %}
-    <p class="footnote">
-      如果你決定 <b>不</b> 照訊號執行，請在下方「決策紀錄」寫下理由。
-      那是兩個月後覆盤時最有價值的資料。
-    </p>
+    {% if actionable | selectattr('ev.position.is_engine', 'equalto', false) | list %}
+      <p class="footnote">
+        手動持股的部分，如果你決定 <b>不</b> 照訊號執行，請在下方「決策紀錄」寫下理由。
+        那是兩個月後覆盤時最有價值的資料。
+      </p>
+    {% endif %}
   {% else %}
     {% if rows %}
       <p class="empty-note">沒有觸發停損或停利的部位，今天不需要動作。</p>
@@ -141,7 +243,7 @@
           <td class="num">—</td><td class="num">—</td>
           <td class="num">—</td><td class="num">—</td>
         {% else %}
-          <td class="num">{{ ev.stop_price | price }}</td>
+          <td class="num" {% if ev.basis_label %}title="停損基準：{{ ev.basis_label }}"{% endif %}>{{ ev.stop_price | price }}</td>
           <td class="num">{{ ev.pct_to_stop | pct }}</td>
           <td class="num">{{ ev.target_price | price }}</td>
           <td class="num">{{ ev.pct_to_target | pct }}</td>
@@ -152,8 +254,12 @@
     {% else %}
       <tr>
         <td colspan="12" class="empty-note">
-          還沒有持股。<b>真的買進之後</b>再用下面的「持股異動」登記——
-          沒買就不用填，這頁會一直顯示「今天不需要動作」。
+          {% if source == 'manual' %}
+            還沒有持股。<b>真的買進之後</b>再用下面的「持股異動」登記——
+            沒買就不用填，這頁會一直顯示「今天不需要動作」。
+          {% else %}
+            引擎目前空手，沒有需要監控的部位。
+          {% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -167,6 +273,21 @@
 </div>
 
 {# ---------- 新增 / 出場 ---------- #}
+{% if read_only %}
+<div class="card">
+  <h2>持股異動 <span class="hint">目前由引擎維護，已停用</span></h2>
+  <p class="lead" style="margin-bottom:8px">
+    這頁監控的是<b>程式交易引擎的部位</b>，進出場都由引擎自己記錄，
+    所以這裡的新增與出場表單先關起來了。
+  </p>
+  <p class="footnote" style="margin-bottom:0">
+    留著表單而不擋下來，會讓你以為登記成功、實際上畫面完全不會變——
+    那比沒有表單更糟。要手動管理持股，把 <code>config/positions.yaml</code>
+    的 <code>source</code> 改成 <code>manual</code>（只看手動持股）或
+    <code>both</code>（兩邊都看），原本填過的資料都還在。
+  </p>
+</div>
+{% else %}
 <div class="card">
   <h2>持股異動</h2>
 
@@ -254,11 +375,16 @@
     </div>
   </details>
 </div>
+{% endif %}
 
 {# ---------- 買進理由 ---------- #}
 {% if rows %}
 <div class="card">
-  <h2>當初的買進理由 <span class="hint">每天看一次：理由現在還成立嗎？</span></h2>
+  {% if source == 'engine' %}
+    <h2>進場理由與出場條件 <span class="hint">規則產生的，不是你寫的</span></h2>
+  {% else %}
+    <h2>當初的買進理由 <span class="hint">每天看一次：理由現在還成立嗎？</span></h2>
+  {% endif %}
   {% for r in rows %}
     {% set p = r.ev.position %}
     <div class="thesis-item">
@@ -268,16 +394,26 @@
         　<span class="{{ 'up' if (r.ev.pnl_pct or 0) >= 0 else 'down' }}">{{ r.ev.pnl_pct | pct }}</span>
       </div>
       <div class="t"><b>買進理由：</b>{{ p.thesis or '（未填寫）' }}</div>
-      <div class="t"><b>認錯條件：</b>{{ p.invalidate or '（未填寫）' }}</div>
+      <div class="t"><b>{{ '出場條件' if p.is_engine else '認錯條件' }}：</b>{{ p.invalidate or '（未填寫）' }}</div>
+      {% if r.ev.basis_label %}
+        <div class="t"><b>停損基準：</b>{{ r.ev.basis_label }}</div>
+      {% endif %}
       {% for note in r.ev.notes %}
         <div class="t" style="color:var(--warn)">⚠️ {{ note }}</div>
       {% endfor %}
     </div>
   {% endfor %}
-  <p class="footnote">
-    理由不成立了 → 就算沒到停損線也該考慮出場。理由還成立 → 就算帳面虧損也不必恐慌。<br>
-    停損線防的是「虧太多」，這一段防的是「抱著一個已經錯掉的理由」。
-  </p>
+  {% if source == 'engine' %}
+    <p class="footnote">
+      每天看一次的意義在於：確認這些規則做出來的決定，跟你原本以為它會做的事是同一回事。<br>
+      如果經常看到「它為什麼買這個」，那是該檢討參數的訊號，不是該手動介入的訊號。
+    </p>
+  {% else %}
+    <p class="footnote">
+      理由不成立了 → 就算沒到停損線也該考慮出場。理由還成立 → 就算帳面虧損也不必恐慌。<br>
+      停損線防的是「虧太多」，這一段防的是「抱著一個已經錯掉的理由」。
+    </p>
+  {% endif %}
 </div>
 {% endif %}
 

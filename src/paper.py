@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields as dataclass_fields
 from pathlib import Path
 
 from history import Bar
@@ -211,6 +211,13 @@ class Account:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Account":
+        """從狀態檔還原。
+
+        ⚠️ `trades` 刻意不還原，狀態檔裡也沒存它——
+        已平倉的交易一律以 append-only 的 paper_trades.jsonl 為準（見 load_trades）。
+        所以 load_state() 回來的 account.trades 一定是空的，
+        它只會裝「這一次執行新平倉」的那幾筆。要算累計績效請用 load_trades()。
+        """
         return cls(
             cash=float(raw.get("cash", 0.0)),
             last_date=str(raw.get("last_date", "")),
@@ -587,23 +594,60 @@ def run_day(
 # --------------------------------------------------------------------------
 
 
+class StateCorrupted(RuntimeError):
+    """狀態檔讀不出來。
+
+    刻意讓它炸出來，而不是安靜地開一個新帳戶——
+    後者會把持股和現金重設成初始資金，但 paper_trades.jsonl 和
+    paper_equity.jsonl 還留著舊紀錄，於是之後每一個績效數字都是錯的，
+    而畫面上完全看不出來。壞掉就該停下來講清楚。
+    """
+
+
+def state_backup_path() -> Path:
+    return STATE_FILE.with_name(STATE_FILE.name + ".bak")
+
+
 def load_state(initial_cash: float) -> Account:
-    """讀出模擬倉狀態。第一次跑就用初始資金開一個新帳戶。"""
+    """讀出模擬倉狀態。檔案不存在＝第一次跑，用初始資金開一個新帳戶。"""
     if not STATE_FILE.exists():
         return Account(cash=initial_cash)
     try:
         raw = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return Account(cash=initial_cash)
-    return Account.from_dict(raw)
+        return Account.from_dict(raw)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+        hint = (
+            "上一次的狀態備份還在，可以請 Claude 幫你還原。"
+            if state_backup_path().exists()
+            else "沒有可用的備份。"
+        )
+        raise StateCorrupted(
+            f"模擬倉的狀態檔讀不出來（{exc}）。為了避免算出錯的績效，"
+            f"這次不執行模擬倉。{hint}"
+        ) from exc
 
 
 def save_state(account: Account) -> None:
+    """原子性寫入，並保留上一版。
+
+    跟 store.save_doc() 同樣的規矩：直接 write_text 的話，
+    寫到一半被中斷就會留下半個 JSON——而那正是 load_state 唯一
+    救不回來的情況。
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(
-        json.dumps(account.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    payload = json.dumps(account.to_dict(), ensure_ascii=False, indent=2)
+
+    if STATE_FILE.exists():
+        try:
+            state_backup_path().write_text(
+                STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+        except OSError:
+            pass   # 備份失敗不該擋住這次存檔
+
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(STATE_FILE)
 
 
 def _append_jsonl(path: Path, payload: dict) -> None:
@@ -614,6 +658,58 @@ def _append_jsonl(path: Path, payload: dict) -> None:
 
 def append_trade(trade: Trade) -> None:
     _append_jsonl(TRADES_FILE, trade.to_dict())
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    """讀 append-only 紀錄檔。壞掉的行跳過，不要讓一行爛資料擋住整份歷史。"""
+    if not path.exists():
+        return []
+    records: list[dict] = []
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return records
+
+
+def load_trades() -> list[Trade]:
+    """讀回**所有**已完成的來回交易，最舊的在前面。
+
+    這是累計績效的唯一來源。狀態檔只記「現在還持有什麼」，
+    平倉紀錄全在這裡——就算狀態檔壞掉重建，這份也還在。
+
+    to_dict() 會多寫 gross_pnl / net_pnl / net_pnl_pct 三個衍生欄位（給人看的），
+    它們不是 Trade 的建構參數，所以這裡要濾掉再還原。
+    """
+    names = {f.name for f in dataclass_fields(Trade)}
+    trades: list[Trade] = []
+    for record in _read_jsonl(TRADES_FILE):
+        try:
+            trades.append(Trade(**{k: v for k, v in record.items() if k in names}))
+        except TypeError:
+            continue   # 舊格式缺欄位，跳過而不是整份炸掉
+    return trades
+
+
+def load_equity_curve() -> list[dict]:
+    """每日淨值紀錄，最舊的在前面。"""
+    return _read_jsonl(EQUITY_FILE)
+
+
+def load_equity_values() -> list[float]:
+    """只要淨值數字，算報酬與最大回撤用。"""
+    values: list[float] = []
+    for record in load_equity_curve():
+        try:
+            values.append(float(record["equity"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return values
 
 
 def append_equity(result: DayResult) -> None:

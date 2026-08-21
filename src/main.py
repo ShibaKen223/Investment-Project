@@ -7,11 +7,16 @@
 流程:
     1. 讀 config/positions.yaml 與 config/strategy.yaml
     2. 抓全市場收盤行情（原始 JSON 存到 data/raw/）
-    3. 算損益、停損停利距離、產生訊號
-    4. 寫 Markdown 報告到 data/reports/YYYY-MM-DD.md
-    5. append 一行結構化紀錄到 data/signals.jsonl（永不改寫，覆盤用）
-    6. 跑模擬倉（config/paper.yaml 的 enabled: true 時）：
+    3. 跑程式交易引擎（config/paper.yaml 的 enabled: true 時）：
        用今日開盤成交昨日委託、用今日收盤產生明日委託，全程虛擬不下真單
+    4. 決定監控哪一份部位（positions.yaml 的 source：manual / engine / both），
+       算損益、停損停利距離、產生訊號
+    5. 寫 Markdown 報告到 data/reports/YYYY-MM-DD.md
+    6. append 一行結構化紀錄到 data/signals.jsonl（永不改寫，覆盤用）
+
+引擎跑在監控之前，順序是有意義的:
+source=engine 時監控的是引擎的部位帳本，先評估再跑引擎的話，
+今天早上剛成交的那幾筆不會出現在今天的報告裡。
 """
 
 from __future__ import annotations
@@ -27,14 +32,13 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 import datasource  # noqa: E402
+import monitor  # noqa: E402
 import paperdaily  # noqa: E402
 import report as report_mod  # noqa: E402
 from portfolio import (  # noqa: E402
+    SIGNAL_LOG,
     Evaluation,
-    Position,
     Rules,
-    evaluate,
-    resolve_rules,
     summarize,
 )
 
@@ -43,7 +47,6 @@ CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 REPORT_DIR = DATA_DIR / "reports"
-SIGNAL_LOG = DATA_DIR / "signals.jsonl"
 
 
 def load_yaml(path: Path) -> dict:
@@ -51,48 +54,6 @@ def load_yaml(path: Path) -> dict:
         raise SystemExit(f"找不到設定檔: {path}")
     with path.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
-
-
-def load_positions(raw: dict) -> tuple[list[Position], list[dict]]:
-    positions: list[Position] = []
-    for entry in raw.get("positions") or []:
-        positions.append(
-            Position(
-                code=str(entry["code"]).strip(),
-                shares=int(entry["shares"]),
-                cost=float(entry["cost"]),
-                entry_date=str(entry["entry_date"]),
-                thesis=str(entry.get("thesis", "")),
-                invalidate=str(entry.get("invalidate", "")),
-                core=bool(entry.get("core", False)),
-                exit_date=entry.get("exit_date"),
-                exit_price=entry.get("exit_price"),
-            )
-        )
-    watchlist = list(raw.get("watchlist") or [])
-    return positions, watchlist
-
-
-def load_peaks(codes: set[str]) -> dict[str, float]:
-    """從歷史訊號紀錄取出每檔的進場後最高收盤價（移動停損用）。"""
-    peaks: dict[str, float] = {}
-    if not SIGNAL_LOG.exists():
-        return peaks
-    with SIGNAL_LOG.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            for item in record.get("positions", []):
-                code = item.get("code")
-                close = item.get("close")
-                if code in codes and isinstance(close, (int, float)):
-                    peaks[code] = max(peaks.get(code, 0.0), float(close))
-    return peaks
 
 
 def append_signal_log(record: dict) -> None:
@@ -108,10 +69,12 @@ def build_signal_record(
     rules: Rules,
     evaluations: list[Evaluation],
     summary: dict,
+    source: str = "manual",
 ) -> dict:
     return {
         "trade_date": trade_date,
         "generated_at": generated_at.isoformat(timespec="seconds"),
+        "source": source,
         "rules": {
             "stop_loss_pct": rules.stop_loss_pct,
             "take_profit_pct": rules.take_profit_pct,
@@ -133,6 +96,8 @@ def build_signal_record(
                 "pnl_pct": round(ev.pnl_pct, 4) if ev.pnl_pct is not None else None,
                 "stop_price": round(ev.stop_price, 4),
                 "target_price": round(ev.target_price, 4),
+                "stop_basis": ev.basis_label or ev.rules.stop_basis,
+                "source": ev.position.source,
                 "signal": ev.signal.value,
             }
             for ev in evaluations
@@ -167,11 +132,6 @@ def main() -> int:
     overrides = {str(k): v for k, v in overrides.items() if v}
     objective = str(strategy.get("objective", "（尚未設定目標）"))
 
-    all_positions, watchlist_cfg = load_positions(positions_cfg)
-    positions = [p for p in all_positions if p.is_open]
-    if not positions:
-        warnings.append("positions.yaml 沒有任何未出場的持股。")
-
     if not args.quiet:
         print("抓取全市場收盤行情…", file=sys.stderr)
     quotes = datasource.fetch_quotes(raw_dir=None if args.dry_run else RAW_DIR)
@@ -184,37 +144,48 @@ def main() -> int:
             "可能是連假，或資料源尚未更新——判讀訊號前請先確認。"
         )
 
-    peaks = load_peaks({p.code for p in positions})
-
-    evaluations: list[Evaluation] = []
-    for position in positions:
-        rules = resolve_rules(base_rules, overrides, position.code)
-        quote = quotes.get(position.code)
-        if quote is None:
-            warnings.append(f"{position.code} 查無當日行情，已跳過訊號判斷。")
-        evaluations.append(
-            evaluate(
-                position,
-                quote,
-                rules,
-                peak_price=peaks.get(position.code),
-            )
-        )
-
-    summary = summarize(evaluations)
-
-    watchlist: list[tuple[dict, datasource.Quote | None]] = [
-        (entry, quotes.get(str(entry.get("code", "")).strip()))
-        for entry in watchlist_cfg
-    ]
-
-    # 模擬倉：完全獨立於上面的持股監控，出錯也不該讓日報產不出來。
+    # 程式交易引擎先跑。它出錯不該讓日報產不出來，但 source=engine 時
+    # 監控的就是它的部位帳本，所以順序不能反過來（見檔案開頭的說明）。
     paper_data = None
     if not args.no_paper:
         try:
             paper_data = paperdaily.run_daily(trade_date, quotes, args.dry_run)
         except Exception as exc:  # noqa: BLE001
-            warnings.append(f"模擬倉執行失敗（不影響持股監控）：{exc}")
+            warnings.append(f"程式交易引擎執行失敗：{exc}")
+
+    # 監控哪一份部位由 positions.yaml 的 source 決定。
+    # 引擎剛跑完的話直接用那份帳戶狀態，不要再從檔案讀一次舊的。
+    mset = monitor.load(positions_cfg, (paper_data or {}).get("account"))
+    warnings.extend(mset.warnings)
+
+    if mset.source != monitor.SOURCE_MANUAL:
+        if args.no_paper:
+            warnings.append(
+                "這次帶了 --no-paper，引擎沒有執行——"
+                "下面監控的是狀態檔裡上一輪的部位，不是今天的。"
+            )
+        stale = monitor.staleness_warning(mset.engine, trade_date)
+        if stale:
+            warnings.append(stale)
+
+    if not mset.positions:
+        warnings.append(
+            "程式交易引擎目前沒有持有任何部位。"
+            if mset.source == monitor.SOURCE_ENGINE
+            else "目前沒有登記任何未出場的持股。"
+        )
+
+    evaluations, eval_warnings = monitor.evaluate_all(
+        mset, quotes, base_rules, overrides
+    )
+    warnings.extend(eval_warnings)
+
+    summary = summarize(evaluations)
+
+    watchlist: list[tuple[dict, datasource.Quote | None]] = [
+        (entry, quotes.get(str(entry.get("code", "")).strip()))
+        for entry in mset.watchlist
+    ]
 
     markdown = report_mod.build_report(
         trade_date=trade_date,
@@ -225,6 +196,7 @@ def main() -> int:
         watchlist=watchlist,
         warnings=warnings,
         paper_data=paper_data,
+        mset=mset,
     )
 
     if not args.quiet:
@@ -240,15 +212,17 @@ def main() -> int:
 
     append_signal_log(
         build_signal_record(
-            trade_date, generated_at, base_rules, evaluations, summary
+            trade_date, generated_at, base_rules, evaluations, summary,
+            source=mset.source,
         )
     )
 
     if not args.quiet:
         print(f"\n報告已寫入：{report_path}", file=sys.stderr)
         print(f"訊號紀錄已附加：{SIGNAL_LOG}", file=sys.stderr)
+        print(f"監控來源：{mset.source_label}", file=sys.stderr)
         if paper_data and "result" in paper_data:
-            print(f"模擬倉淨值：{paper_data['result'].equity:,.0f}", file=sys.stderr)
+            print(f"引擎淨值：{paper_data['result'].equity:,.0f}", file=sys.stderr)
 
     # 有觸發訊號才寄信；未設定 config/mail.yaml 就安靜略過
     if not args.no_email:

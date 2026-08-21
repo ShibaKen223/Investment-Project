@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -549,6 +550,141 @@ check(
     str(stats["profit_factor"]),
 )
 check("零交易時不會除以零", paper.performance([], [], 1_000_000)["trades"] == 0)
+
+
+# ==========================================================================
+print()
+print("--- 累計績效的來源是紀錄檔，不是帳戶狀態 ---")
+# ==========================================================================
+# 曾經的 bug：報告拿 account.trades 算勝率，但 load_state() 根本不還原歷史成交，
+# 所以「完成交易 N 筆」每天都從零開始，而且網頁跟報告會顯示兩個不同的數字。
+
+import json       # noqa: E402
+import tempfile  # noqa: E402
+
+_tmp = Path(tempfile.mkdtemp(prefix="paper-test-"))
+paper.DATA_DIR = _tmp
+paper.TRADES_FILE = _tmp / "paper_trades.jsonl"
+paper.EQUITY_FILE = _tmp / "paper_equity.jsonl"
+paper.STATE_FILE = _tmp / "paper_state.json"
+
+for _t in sample:
+    paper.append_trade(_t)
+
+_reloaded = paper.load_trades()
+check("成交紀錄可以完整讀回", len(_reloaded) == 2, f"讀回 {len(_reloaded)} 筆")
+check(
+    "讀回來的淨損益跟寫進去的一致（衍生欄位不會擋住還原）",
+    _reloaded and abs(_reloaded[0].net_pnl - sample[0].net_pnl) < 1e-9,
+)
+
+_acct = Account(cash=500_000.0, last_date="2026-01-05")
+_acct.trades.extend(sample)
+paper.save_state(_acct)
+_restored = paper.load_state(1_000_000.0)
+check("狀態檔不負責記平倉交易", _restored.trades == [], str(_restored.trades))
+check("但現金與日期有還原", _restored.cash == 500_000.0 and _restored.last_date == "2026-01-05")
+check(
+    "由紀錄檔算出的累計筆數 = 2（不會每天歸零）",
+    paper.performance(paper.load_trades(), [1_000_000], 1_000_000)["trades"] == 2,
+)
+
+
+# ==========================================================================
+print()
+print("--- 狀態檔壞掉要出聲，不能安靜地重開一個新帳戶 ---")
+# ==========================================================================
+# 曾經的行為：JSONDecodeError 就回傳 Account(cash=initial_cash)。
+# 帳戶被重設成 100 萬，但成交與淨值紀錄還留著舊的，
+# 於是之後每一個績效數字都是錯的，而畫面上完全看不出來。
+
+check(
+    "第一次存檔沒有上一版可備份",
+    not paper.state_backup_path().exists(),
+)
+
+_acct.cash = 123_456.0
+paper.save_state(_acct)          # 第二次存檔
+check("第二次存檔會留下上一版的備份", paper.state_backup_path().exists())
+check(
+    "備份裡是「上一版」而不是這次寫進去的內容",
+    json.loads(paper.state_backup_path().read_text(encoding="utf-8"))["cash"] == 500_000.0,
+)
+check(
+    "正本是這次的內容",
+    paper.load_state(1_000_000.0).cash == 123_456.0,
+)
+
+paper.STATE_FILE.write_text('{"cash": 500000, "positio', encoding="utf-8")  # 半個 JSON
+try:
+    paper.load_state(1_000_000.0)
+    check("壞掉的狀態檔會丟出 StateCorrupted", False, "沒有丟出例外就回傳了")
+except paper.StateCorrupted as _exc:
+    check("壞掉的狀態檔會丟出 StateCorrupted", True)
+    check(
+        "而且訊息會提到還有備份可以還原",
+        "備份" in str(_exc),
+        str(_exc),
+    )
+
+paper.STATE_FILE.unlink()
+check(
+    "狀態檔不存在＝第一次跑，這種情況才可以開新帳戶",
+    paper.load_state(1_000_000.0).cash == 1_000_000.0,
+)
+
+
+# ==========================================================================
+print()
+print("--- 追蹤池少一檔，那檔的出場判斷會整段被跳過 ---")
+# ==========================================================================
+# 從觀察清單移除一檔仍被模擬倉持有的股票時，它會從 universe 消失，
+# 於是永遠不做出場判斷、待賣委託也永遠成交不了——一張賣不掉的殭屍持股。
+# paperdaily 必須把模擬倉現有持股併回追蹤池，這兩項就是在守那件事。
+
+_crash_bars = seq_bars([100.0] * 70 + [80.0])
+_last = _crash_bars[-1].date
+_params = StrategyParams(stop_loss_pct=8.0, max_hold_bars=999)
+_acct_params = AccountParams(initial_cash=1_000_000.0)
+_costs = Costs()
+
+
+def _holding_account() -> Account:
+    acct = Account(cash=800_000.0)
+    acct.positions["9999"] = paper.PaperPosition(
+        code="9999", shares=1000, entry_price=100.0,
+        entry_date=_crash_bars[0].date, entry_fee=20.0,
+        peak_close=100.0, bars_held=5,
+    )
+    return acct
+
+
+_with = _holding_account()
+_res_with = paper.run_day(
+    _with, _last, {"9999": Series(code="9999", bars=_crash_bars)},
+    _params, _acct_params, _costs,
+)
+check(
+    "在追蹤池裡：收盤 80 跌破停損線 92 → 產生賣單",
+    len(_res_with.sell_orders) == 1,
+    f"得到 {len(_res_with.sell_orders)} 張賣單",
+)
+
+_without = _holding_account()
+_res_without = paper.run_day(
+    _without, _last, {}, _params, _acct_params, _costs,
+)
+check(
+    "不在追蹤池裡：同一根 K 完全不產生賣單",
+    _res_without.sell_orders == [],
+    str(_res_without.sell_orders),
+)
+check("而且部位還留著，不會自己消失", "9999" in _without.positions)
+check(
+    "已抱根數也停止累加（時間出場永遠不會觸發）",
+    _without.positions["9999"].bars_held == 5,
+    str(_without.positions["9999"].bars_held),
+)
 
 
 # ==========================================================================

@@ -85,9 +85,20 @@ def run_daily(
     costs = Costs.from_dict(config.get("costs"))
     params = StrategyParams.from_dict(config.get("strategy"))
 
+    account = paper.load_state(account_params.initial_cash)
+
+    # 追蹤池 = 設定裡的持股+觀察清單，「加上」模擬倉現在還抱著的代號。
+    #
+    # 少了後面那半會出事：從觀察清單移掉一檔股票時，如果模擬倉正持有它，
+    # 它就會從 universe 消失——沒有開盤價可以成交待賣委託、bars_held 不再增加、
+    # 出場判斷整段被跳過。那筆部位會變成一張永遠賣不掉的殭屍持股，
+    # 而且淨值還會用進場價估給你看，畫面上完全看不出哪裡不對。
     codes = history.universe_from_config()
+    orphaned = [c for c in account.positions if c not in codes]
+    codes = codes + orphaned
+
     if not codes:
-        return {"skipped": "positions.yaml 裡沒有任何持股或觀察標的。"}
+        return {"skipped": "目前沒有登記任何持股或觀察清單標的。"}
 
     if not dry_run:
         ingest_quotes(codes, quotes)
@@ -104,11 +115,9 @@ def run_daily(
 
     if not universe:
         return {
-            "skipped": "還沒有任何歷史日 K。先跑 `python3 src/history.py` 補資料，"
-            "或等系統每天累積。"
+            "skipped": "還沒有任何歷史日 K，資料會隨系統每天執行慢慢累積，"
+            "累積到足夠天數後這裡就會開始有內容。"
         }
-
-    account = paper.load_state(account_params.initial_cash)
 
     # 同一個交易日重跑不應該重複成交一次。
     if account.last_date == trade_date:
@@ -130,9 +139,20 @@ def run_daily(
         paper.append_equity(result)
         paper.save_state(account)
 
-    curve = _equity_curve()
+    # 績效一律以 append-only 的紀錄檔為準，不要用 account.trades——
+    # load_state() 不還原歷史成交，account.trades 只有「這次執行剛平倉」的那幾筆，
+    # 拿它算勝率會讓報告上的累計數字每天從零開始。
+    #
+    # 非 dry-run 時上面已經 append 過了，讀回來就含今天；
+    # dry-run 沒寫檔，所以把今天的結果手動補上，數字才跟實跑一致。
+    all_trades = paper.load_trades()
+    curve = paper.load_equity_values()
+    if dry_run:
+        all_trades = all_trades + account.trades[before_trades:]
+        curve = curve + [result.equity]
+
     stats = paper.performance(
-        account.trades, curve or [result.equity], account_params.initial_cash
+        all_trades, curve or [result.equity], account_params.initial_cash
     )
 
     return {
@@ -142,24 +162,6 @@ def run_daily(
         "params": params,
         "account_params": account_params,
         "warmup_short": warmup_short,
+        "orphaned": orphaned,
         "closes": {c: s.bars[-1].close for c, s in universe.items()},
     }
-
-
-def _equity_curve() -> list[float]:
-    """讀出歷史淨值，畫曲線與算回撤用。"""
-    import json
-
-    if not paper.EQUITY_FILE.exists():
-        return []
-    curve: list[float] = []
-    with paper.EQUITY_FILE.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                curve.append(float(json.loads(line)["equity"]))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                continue
-    return curve

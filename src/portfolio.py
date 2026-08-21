@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
+from pathlib import Path
 
 from datasource import Quote
+
+ROOT = Path(__file__).resolve().parent.parent
+SIGNAL_LOG = ROOT / "data" / "signals.jsonl"
 
 
 class Signal(str, Enum):
@@ -51,6 +56,15 @@ class Position:
     exit_date: str | None = None
     exit_price: float | None = None
 
+    # 這筆部位是誰維護的。"manual" = 你自己填在 positions.yaml，
+    # "engine" = 程式交易引擎的部位帳本（data/paper_state.json）。
+    # 畫面與報告要靠它決定「這一列能不能手動改」。
+    source: str = "manual"
+
+    @property
+    def is_engine(self) -> bool:
+        return self.source == "engine"
+
     @property
     def is_open(self) -> bool:
         return self.exit_date is None
@@ -63,6 +77,21 @@ class Position:
         today = today or date.today()
         entered = datetime.strptime(self.entry_date, "%Y-%m-%d").date()
         return (today - entered).days
+
+
+# strategy.yaml 出廠時 objective 裡帶的那句話。用它認出「還沒改過」。
+DEFAULT_OBJECTIVE_MARKER = "這是預設範例"
+
+
+def objective_is_unset(objective: str | None) -> bool:
+    """目標還停在出廠預設值嗎。
+
+    這一行每天印在報告和畫面的最上面，看起來就像已經設定好了。
+    分辨得出來才有辦法提醒你去寫自己的——
+    一個沒人真心寫過的目標比沒有目標更糟，它會讓你以為自己有紀律。
+    """
+    text = (objective or "").strip()
+    return not text or DEFAULT_OBJECTIVE_MARKER in text
 
 
 @dataclass
@@ -81,6 +110,15 @@ class Evaluation:
     signal: Signal
     peak_price: float | None = None      # 進場後最高價（trailing 用）
     notes: list[str] = field(default_factory=list)
+
+    # 由外部指定的絕對停損 / 停利價。程式交易引擎的部位一定要走這條路:
+    # 引擎的出場價是用「進場成交價 ± N×進場當下的 ATR」算的，
+    # 監控層自己用 rules 的百分比重算會得到另一組數字，
+    # 於是畫面上的停損線跟引擎明天真的會賣的價格對不起來——
+    # 那比沒有停損線更危險，因為它看起來是對的。
+    stop_override: float | None = None
+    target_override: float | None = None
+    basis_label: str = ""                # 這兩條線怎麼來的，一句話
 
     # --- 損益 ---
     @property
@@ -108,10 +146,14 @@ class Evaluation:
 
     @property
     def stop_price(self) -> float:
+        if self.stop_override is not None:
+            return self.stop_override
         return self.stop_reference * (1 - self.rules.stop_loss_pct / 100)
 
     @property
     def target_price(self) -> float:
+        if self.target_override is not None:
+            return self.target_override
         return self.position.cost * (1 + self.rules.take_profit_pct / 100)
 
     @property
@@ -137,6 +179,50 @@ class Evaluation:
         return (self.target_price / self.quote.close - 1) * 100
 
 
+def load_peaks(positions: list[Position]) -> dict[str, float]:
+    """每個部位「進場之後」的最高收盤價，移動停損（stop_basis=trailing）用。
+
+    一定要用 entry_date 切，不能整份掃過去取最大值：
+    signals.jsonl 是 append-only 的全歷史，同一個代號裡面可能混著
+    這次進場**之前**的價格，甚至上一輪早就出場的那個部位的價格。
+    拿那種高點當移動停損的基準，停損線會被莫名其妙地往上拉，
+    而畫面上只會看到一條「不知道為什麼這麼高」的停損線。
+
+    同樣的理由，來源是程式交易引擎的那些列要跳過:
+    引擎的部位有自己的一套停損（進場價 ± N×ATR，在進場當下就固定），
+    它的收盤價不該混進手動持股的移動停損基準裡。
+    舊紀錄沒有 source 欄位，那時候還沒有引擎部位，一律視為手動。
+
+    ISO 日期字串直接比大小就是時間順序，不用轉 datetime。
+    """
+    entry_dates = {p.code: p.entry_date for p in positions}
+    if not entry_dates or not SIGNAL_LOG.exists():
+        return {}
+
+    peaks: dict[str, float] = {}
+    with SIGNAL_LOG.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            trade_date = str(record.get("trade_date") or "")
+            for item in record.get("positions", []):
+                if item.get("source", "manual") != "manual":
+                    continue
+                code = item.get("code")
+                entry_date = entry_dates.get(code)
+                if entry_date is None or trade_date < entry_date:
+                    continue
+                close = item.get("close")
+                if isinstance(close, (int, float)):
+                    peaks[code] = max(peaks.get(code, 0.0), float(close))
+    return peaks
+
+
 def resolve_rules(base: Rules, overrides: dict[str, dict], code: str) -> Rules:
     """套用個股例外規則。未列出的個股回傳原本的 rules。"""
     override = overrides.get(code)
@@ -160,14 +246,25 @@ def evaluate(
     rules: Rules,
     peak_price: float | None = None,
     today: date | None = None,
+    stop_override: float | None = None,
+    target_override: float | None = None,
+    basis_label: str = "",
 ) -> Evaluation:
-    """對單一部位算出當日訊號。"""
+    """對單一部位算出當日訊號。
+
+    stop_override / target_override 給定時，停損停利改用這兩個絕對價位，
+    rules 只剩 near_threshold_pct 還有作用（多近才算「接近」）。
+    程式交易引擎的部位走的就是這條路，見 Evaluation 的欄位說明。
+    """
     ev = Evaluation(
         position=position,
         quote=quote,
         rules=rules,
         signal=Signal.NO_DATA,
         peak_price=peak_price,
+        stop_override=stop_override,
+        target_override=target_override,
+        basis_label=basis_label,
     )
 
     if quote is None:
@@ -192,13 +289,13 @@ def evaluate(
     else:
         ev.signal = Signal.HOLD
 
-    if rules.stop_basis == "trailing" and peak_price is None:
+    if rules.stop_basis == "trailing" and peak_price is None and stop_override is None:
         ev.notes.append(
             "移動停損尚無歷史高點，暫以成本價計算；訊號記錄累積後會自動修正。"
         )
 
     if position.holding_days(today) < 0:
-        ev.notes.append("進場日在未來，請檢查 positions.yaml。")
+        ev.notes.append("進場日在未來，請確認登記的進場日期有沒有打錯。")
 
     return ev
 

@@ -156,6 +156,41 @@ config/sectors.yaml    產業地圖（26 檔）
 
 ---
 
+## 監控層要監控誰
+
+「今日」頁與日報上的持股，來源由 `config/positions.yaml` 最上面的 `source` 決定：
+
+| `source` | 監控對象 | 適合什麼時候 |
+| --- | --- | --- |
+| `manual` | 你自己填在 `positions.yaml` 的持股 | 你自己下單、自己記帳 |
+| `engine` | 程式交易引擎的部位帳本（`data/paper_state.json`） | 想直接看「這套規則現在抱著什麼」 |
+| `both` | 兩邊都看，各自標示來源 | 過渡期，想同時對照 |
+
+設成 `engine` 之後，每次成交不用再回頭手動編輯 YAML。
+這不只是省事：**手動登記漏一筆，畫面上不會有任何地方看得出來**——
+損益、停損線、投組總覽全都照樣算得出數字，只是全部是錯的。
+
+### 停損線用誰的規則（重要）
+
+引擎部位的停損停利價，一律由**引擎自己的規則**算
+（`config/paper.yaml` 的 `strategy` 那一段，ATR 模式時是「進場價 ± N × 進場當下的 ATR」），
+**不套用 `strategy.yaml` 的 `rules` 百分比**，個股例外規則也不套用。
+
+理由是這兩套參數本來就獨立。如果讓監控層用自己的百分比重算，
+畫面上會出現一條「引擎明天根本不會照它執行」的停損線——
+那比沒有停損線更危險，因為它看起來完全正確。
+每一條線旁邊都會標明它是怎麼來的（例如 `2×ATR(14)＝24.00 元`）。
+
+`source: engine` 時，儀表板的「持股異動」表單會被停用。
+不擋的話那些表單還是會寫進 `positions.yaml`，但畫面完全不會變——
+讓人以為做了某件事而其實沒有，比擋下來難救得多。
+`positions.yaml` 裡原本的資料仍然保留，改回 `manual` 就會回來。
+
+⚠️ 這一切仍然**沒有連接任何券商**。引擎的「自動進出場」發生在它自己的帳本裡，
+`source: engine` 只是換了監控對象，不代表有任何一張單真的送出去。
+
+---
+
 ## 模擬倉（paper trading）
 
 除了監控你手上的持股，系統還可以**自己跑一套 1～2 週的波段策略**——
@@ -374,7 +409,8 @@ data/paper_equity.jsonl 每日淨值曲線                    ← append-only
 ## 檔案在哪
 
 ```
-config/positions.yaml   持股（介面會自動維護，也可手動編輯）
+config/positions.yaml   監控來源（source）、持股、觀察清單
+                        （介面會自動維護，也可手動編輯）
 config/strategy.yaml    停損停利規則 + 變更紀錄
 config/paper.yaml       模擬倉：資金、成本、波段策略參數
 config/glossary.yaml    名詞辭典（研究筆記用）
@@ -428,9 +464,18 @@ python3 src/backtest.py --verbose        # 印出每一筆成交
 ## 測試
 
 ```bash
-python3 tests/test_signals.py     # 停損停利判斷的 13 條分支
+python3 tests/run_all.py          # 一次跑完（失敗時結束碼 1，可掛排程或 git hook）
+python3 tests/run_all.py -v       # 連每一項 PASS/FAIL 都印出來
+```
+
+想單獨跑某一支：
+
+```bash
+python3 tests/test_signals.py     # 停損停利判斷的分支、移動停損峰值的起算日
+python3 tests/test_monitor.py     # 監控層接引擎部位：停損線必須跟引擎一致
 python3 tests/test_store.py       # 透過介面改設定不會弄壞 YAML
-python3 tests/test_paper.py       # 交易成本、進出場訊號、成交、名額上限
+python3 tests/test_paper.py       # 交易成本、進出場訊號、成交、名額上限、
+                                  #   累計績效的來源、狀態檔壞掉的行為
 python3 tests/test_history.py     # 日 K 存取、民國日期、TWSE 解析
 python3 tests/test_backtest.py    # 回測引擎的不變式（合成資料，不連網）
 python3 tests/test_research.py    # 指標計算、ATR、名詞查詢、知識庫完整性

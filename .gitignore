@@ -15,6 +15,11 @@ data/history/
 # 報告與訊號紀錄「要」進版控 —— 那是你的覆盤證據。
 # 如果不想公開持股，改成把整個 repo 設為 private，
 # 不要用 .gitignore 把 data/reports/ 和 data/signals.jsonl 排除掉。
+# 模擬倉狀態檔的備份與寫入暫存檔，是衍生物，不進版控。
+# （paper_state.json 本身要進——它是「模擬倉現在持有什麼」的唯一紀錄）
+data/paper_state.json.bak
+data/paper_state.json.tmp
+
 config/mail.yaml
 data/app.log
 data/daily.log
