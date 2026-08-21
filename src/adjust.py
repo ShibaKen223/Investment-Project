@@ -26,21 +26,30 @@
      乘上因子往下壓。這個方向很重要——現價、停損線、你券商 App 上看到的
      數字必須是同一個，不能為了讓歷史好看而去動今天的價格。
 
-它偵測不到什麼（老實說）
-------------------------
-**一般的現金股息偵測不到。** 殖利率 5% 的股票除息當天跌 5%，
-跟真的跌 5% 在價格序列上長得一模一樣，沒有外部資料就分不出來。
+三個資料來源，準確度由高到低
+----------------------------
+1. **TWSE 除權除息計算結果表**（`--fetch`，優先用這個）
+   官方直接給「除權息前收盤價」與「除權息參考價」，因子是這兩個數字
+   相除，不需要任何估計。涵蓋上市股票與 ETF。
 
-所以另外留了兩條路:
+2. **每日行情反推**（`scan_quotes()`，抓當天發生的事件）
+   TWSE 的每日行情裡，除權息當天的「漲跌」是相對**除權息參考價**算的，
+   不是相對昨收。所以 `收盤 − 漲跌 ≠ 昨天的收盤` 就是除權息的指紋。
+   在每日流程裡當警報用（見 main.py）。
 
-  * `config/corporate_actions.yaml` 可以手動補登任何一筆（含現金股息）
-  * `implied_action_from_quote()` 走的是另一個管道：TWSE 的每日行情裡，
-    除權息當天的「漲跌」是相對**除權息參考價**算的，不是相對昨收。
-    所以 `收盤 − 漲跌 ≠ 昨天的收盤` 就是除權息的指紋，當天抓得到。
-    這條在每日流程裡當警報用（見 main.py），抓的是「從今天開始」的事件。
+3. **價格序列偵測**（`--scan`，最後手段）
+   台股有 10% 漲跌幅限制，跌超過 11% 不可能是真的跌。
+   這條抓得到 1、2 都漏掉的東西——例如 0050 的受益權單位分割，
+   那不是除權息，不會出現在結果表裡。
 
-歷史上的現金股息目前沒有自動補登的來源——TWSE 的除權除息計算結果表
-擋掉了程式化存取。要完全精確就得手動補，格式見那份 YAML 的說明。
+⚠️ 第 3 條**只可靠地認得出分割**。一般現金股息從價格序列分不出來
+   （跌 5% 跟真的跌 5% 長得一樣），而且用開盤價估出來的因子會錯得
+   很難看——實測 3034 估出來是「2026-07-13 參考價 494.00」，
+   官方是「2026-07-10 參考價 519.00」，日期和數字都不對。
+   所以偵測到的疑似配息一律標 `ignore`，不套用猜來的數字。
+
+上櫃（TPEX）目前沒有接對應的結果表，上櫃標的的除權息要手動補登，
+格式見 `config/corporate_actions.yaml` 的說明。
 """
 
 from __future__ import annotations
@@ -370,6 +379,112 @@ def implied_action_from_quote(
     )
 
 
+# TWSE 除權除息計算結果表。這是唯一權威的來源:
+# 它直接給「除權息前收盤價」與「除權息參考價」，因子是這兩個數字相除，
+# 不需要任何估計。從價格序列反推是不得已的替代方案，而且會錯——
+# 實測 3034 用開盤價估出來的除息日是 2026-07-13、參考價 494.00，
+# 官方是 2026-07-10、519.00，日期和數字都不對。
+TWSE_EXRIGHT_URL = "https://www.twse.com.tw/rwd/zh/exRight/TWT49U"
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+)
+
+
+def _roc_date_to_iso(text: str) -> str | None:
+    """'115年06月11日' -> '2026-06-11'。看不懂就回 None。"""
+    text = str(text).strip()
+    try:
+        year, rest = text.split("年", 1)
+        month, rest = rest.split("月", 1)
+        day = rest.replace("日", "").strip()
+        return f"{int(year) + 1911:04d}-{int(month):02d}-{int(day):02d}"
+    except (ValueError, AttributeError):
+        return None
+
+
+def fetch_twse_month(year: int, month: int, timeout: int = 25) -> list[Action]:
+    """抓 TWSE 某個月的除權息結果表。回傳該月所有標的的行為。
+
+    欄位位置不寫死——用標題文字去找，端點改版加欄位時才不會靜靜錯位。
+    """
+    import requests
+
+    resp = requests.get(
+        TWSE_EXRIGHT_URL,
+        params={
+            "startDate": f"{year:04d}{month:02d}01",
+            "endDate": f"{year:04d}{month:02d}31",
+            "response": "json",
+        },
+        timeout=timeout,
+        headers={"User-Agent": _BROWSER_UA},
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if str(payload.get("stat", "")).upper() != "OK":
+        return []
+
+    fields = [str(f).strip() for f in (payload.get("fields") or [])]
+
+    def index_of(*keywords: str) -> int | None:
+        for idx, name in enumerate(fields):
+            if any(kw in name for kw in keywords):
+                return idx
+        return None
+
+    i_date = index_of("資料日期")
+    i_code = index_of("股票代號")
+    i_name = index_of("股票名稱")
+    i_prev = index_of("除權息前收盤價")
+    i_ref = index_of("除權息參考價")
+    i_kind = index_of("權/息")
+    if None in (i_date, i_code, i_prev, i_ref):
+        raise RuntimeError(
+            f"除權息結果表的欄位跟預期不符，可能改版了：{fields}"
+        )
+
+    out: list[Action] = []
+    for row in payload.get("data") or []:
+        try:
+            iso = _roc_date_to_iso(row[i_date])
+            prev_close = float(str(row[i_prev]).replace(",", ""))
+            ref_price = float(str(row[i_ref]).replace(",", ""))
+        except (IndexError, ValueError, TypeError):
+            continue
+        if not iso or prev_close <= 0 or ref_price <= 0:
+            continue
+        factor = ref_price / prev_close
+        if not 0 < factor <= 1.0000001:
+            continue
+
+        name = str(row[i_name]).strip() if i_name is not None else ""
+        label = str(row[i_kind]).strip() if i_kind is not None else ""
+        value = round((1 - factor) * prev_close, 4)
+        out.append(
+            Action(
+                code=str(row[i_code]).strip(),
+                date=iso,
+                factor=factor,
+                # 用因子大小分類，而不是「權/息」這個標籤。
+                # 配股確實會改變股數，但台股的除權多半只配個幾十股，
+                # 因子在 0.99 上下——那種規模的成交量還原純粹是雜訊，
+                # 而且「權息一起發」時價格因子跟配股比例本來就不相等，
+                # 硬拿它去調量反而引入誤差。
+                # 真正需要還原成交量的是 1:2、1:4 那種分割，
+                # 它們的因子一定遠低於 SPLIT_FACTOR_MAX。
+                kind=_infer_kind(factor),
+                note=(
+                    f"TWSE 除權息結果表{f'（{name}）' if name else ''}："
+                    f"前收 {prev_close:g} → 參考價 {ref_price:g}"
+                    f"，權值+息值 {value:g}{f'（{label}）' if label else ''}"
+                ),
+                source="twse",
+            )
+        )
+    return out
+
+
 def scan_quotes(quotes: dict, codes: list[str]) -> list[Action]:
     """用今天的行情檢查這些代號有沒有除權息。回傳偵測到的行為。
 
@@ -483,6 +598,85 @@ _ACTIONS_HEADER = '''# =========================================================
 # --------------------------------------------------------------------------
 
 
+def _do_fetch(args, existing: dict[str, list[Action]]) -> int:
+    """從 TWSE 抓官方除權息資料，只留下我們有在追蹤的代號。"""
+    import time
+    from datetime import date
+
+    import history
+
+    tracked = set(
+        [c.strip() for c in args.codes.split(",") if c.strip()]
+        if args.codes
+        else history.available_codes()
+    )
+    if not tracked:
+        print("沒有任何追蹤中的代號。先跑 python3 src/history.py 補歷史。")
+        return 1
+
+    today = date.today()
+    months: list[tuple[int, int]] = []
+    year, month = today.year, today.month
+    for _ in range(max(args.months, 1)):
+        months.append((year, month))
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    months.reverse()
+
+    print(f"從 TWSE 除權息結果表抓 {len(months)} 個月，"
+          f"比對 {len(tracked)} 檔追蹤中的標的…\n")
+
+    found: list[Action] = []
+    failures: list[str] = []
+    for year, month in months:
+        try:
+            rows = fetch_twse_month(year, month)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{year}-{month:02d}（{type(exc).__name__}）")
+            continue
+        hits = [a for a in rows if a.code in tracked]
+        found.extend(hits)
+        print(f"  {year}-{month:02d}  該月 {len(rows):>3} 筆，"
+              f"其中我們追蹤的 {len(hits)} 筆")
+        time.sleep(1.5)   # 對端點客氣一點，被擋了反而更慢
+
+    if failures:
+        print(f"\n⚠️  這些月份抓失敗，稍後可以重跑補上：{'、'.join(failures)}")
+
+    if not found:
+        print("\n沒有抓到任何相關的除權息紀錄。")
+        return 0
+
+    # 官方資料要蓋掉先前用估計值猜出來的那幾筆——
+    # 估來的因子連日期都可能是錯的，留著只會擋住正確的資料。
+    cleaned: dict[str, list[Action]] = {}
+    dropped = 0
+    for code, items in existing.items():
+        keep = [a for a in items if a.source != "detected" or a.kind == "split"]
+        dropped += len(items) - len(keep)
+        if keep:
+            cleaned[code] = keep
+
+    merged, added = merge_actions(cleaned, found)
+
+    print(f"\n抓到 {len(found)} 筆，其中 {len(added)} 筆是新的：\n")
+    for action in added:
+        print(f"  ＋  {action.describe()}")
+    if dropped:
+        print(f"\n（順便清掉 {dropped} 筆先前用價格序列估出來的紀錄，"
+              "官方資料比它們準）")
+
+    if not args.write:
+        print(f"\n這次沒有寫檔。加上 --write 才會寫進 {ACTIONS_FILE.name}。")
+        return 0
+
+    save_actions(merged)
+    print(f"\n✅ 已寫入 {ACTIONS_FILE}")
+    print("   這些是官方參考價，不是估計值，所以直接生效（沒有標 ignore）。")
+    return 0
+
+
 def main() -> int:
     import argparse
 
@@ -490,6 +684,14 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(
         description="還原權值：偵測並登記除權息與股票分割造成的價格斷崖。"
+    )
+    parser.add_argument(
+        "--fetch", action="store_true",
+        help="從 TWSE 除權息結果表抓官方參考價（準確，優先用這個）",
+    )
+    parser.add_argument(
+        "--months", type=int, default=24,
+        help="--fetch 要往回抓幾個月（預設 24）",
     )
     parser.add_argument(
         "--scan", action="store_true", help="掃描所有歷史檔案，找出價格斷崖"
@@ -511,6 +713,9 @@ def main() -> int:
     args = parser.parse_args()
 
     existing = load_actions()
+
+    if args.fetch:
+        return _do_fetch(args, existing)
 
     if args.list or not args.scan:
         if not existing:

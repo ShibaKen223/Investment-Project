@@ -35,22 +35,557 @@
 
 actions:
   "0050":
+    - date: "2025-01-17"
+      factor: 0.98636708
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（元大台灣50）：前收 198.05 → 參考價 195.35，權值+息值 2.7（息）"
     - date: "2025-06-18"
       factor: 0.25000000
       kind: split
       source: detected
       note: "自動偵測：188.65 → 47.57（中間隔了 8 天，因子可能不準）；吸附到 1:4 分割"
-  "2603":
+    - date: "2025-07-21"
+      factor: 0.99300292
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（元大台灣50）：前收 51.45 → 參考價 51.09，權值+息值 0.36（息）"
+    - date: "2026-01-22"
+      factor: 0.98608212
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（元大台灣50）：前收 71.85 → 參考價 70.85，權值+息值 1（息）"
+    - date: "2026-07-21"
+      factor: 0.99395161
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（元大台灣50）：前收 99.2 → 參考價 98.6，權值+息值 0.6（息）"
+  "006208":
+    - date: "2024-11-18"
+      factor: 0.99198575
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦台50）：前收 112.3 → 參考價 111.4，權值+息值 0.9（息）"
+    - date: "2025-07-16"
+      factor: 0.99153846
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦台50）：前收 117 → 參考價 116.01，權值+息值 0.99（息）"
+    - date: "2025-11-18"
+      factor: 0.97617403
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦台50）：前收 144.8 → 參考價 141.35，權值+息值 3.45（息）"
+    - date: "2026-07-16"
+      factor: 0.98073804
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦台50）：前收 246.6 → 參考價 241.85，權值+息值 4.75（息）"
+  "00919":
+    - date: "2024-09-23"
+      factor: 0.97022333
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 24.18 → 參考價 23.46，權值+息值 0.72（息）"
+    - date: "2024-12-20"
+      factor: 0.96996245
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 23.97 → 參考價 23.25，權值+息值 0.72（息）"
+    - date: "2025-03-18"
+      factor: 0.96967144
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 23.74 → 參考價 23.02，權值+息值 0.72（息）"
+    - date: "2025-06-17"
+      factor: 0.96798577
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 22.49 → 參考價 21.77，權值+息值 0.72（息）"
+    - date: "2025-09-16"
+      factor: 0.97521799
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 21.79 → 參考價 21.25，權值+息值 0.54（息）"
+    - date: "2025-12-16"
+      factor: 0.97566471
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 22.19 → 參考價 21.65，權值+息值 0.54（息）"
+    - date: "2026-03-17"
+      factor: 0.96737767
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 23.91 → 參考價 23.13，權值+息值 0.78（息）"
+    - date: "2026-06-16"
+      factor: 0.96741610
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（群益台灣精選高息）：前收 30.69 → 參考價 29.69，權值+息值 1（息）"
+  "1216":
+    - date: "2025-07-31"
+      factor: 0.96372430
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（統一）：前收 82.7 → 參考價 79.7，權值+息值 3（息）"
+    - date: "2026-07-30"
+      factor: 0.96163683
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（統一）：前收 78.2 → 參考價 75.2，權值+息值 3（息）"
+  "1301":
+    - date: "2025-07-15"
+      factor: 0.98599440
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台塑）：前收 35.7 → 參考價 35.2，權值+息值 0.5（息）"
+    - date: "2026-06-30"
+      factor: 0.99060150
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台塑）：前收 53.2 → 參考價 52.7，權值+息值 0.5（息）"
+  "1605":
+    - date: "2025-06-04"
+      factor: 0.97416268
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華新）：前收 20.9 → 參考價 20.36，權值+息值 0.54（權息）"
+    - date: "2026-06-11"
+      factor: 0.98563218
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華新）：前收 34.8 → 參考價 34.3，權值+息值 0.5（息）"
+  "2002":
+    - date: "2025-07-24"
+      factor: 0.98350000
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（中鋼）：前收 20 → 參考價 19.67，權值+息值 0.33（息）"
+    - date: "2026-07-24"
+      factor: 0.99214660
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（中鋼）：前收 19.1 → 參考價 18.95，權值+息值 0.15（息）"
+  "2303":
+    - date: "2025-06-24"
+      factor: 0.93914894
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯電）：前收 47 → 參考價 44.14，權值+息值 2.86（息）"
+    - date: "2026-07-08"
+      factor: 0.98316129
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯電）：前收 155 → 參考價 152.39，權值+息值 2.61（息）"
+  "2308":
+    - date: "2025-06-17"
+      factor: 0.98252185
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台達電）：前收 400.5 → 參考價 393.5，權值+息值 7（息）"
     - date: "2026-06-17"
-      factor: 0.89795918
+      factor: 0.99479821
       kind: dividend
-      source: detected
-      ignore: true
-      note: "疑似除權息：220.5 → 194；此因子由開盤價估算，請填入公告的除權息參考價後把 ignore 拿掉"
+      source: twse
+      note: "TWSE 除權息結果表（台達電）：前收 2230 → 參考價 2218.4，權值+息值 11.6（息）"
+  "2313":
+    - date: "2025-06-03"
+      factor: 0.96033058
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華通）：前收 60.5 → 參考價 58.1，權值+息值 2.4（息）"
+    - date: "2026-06-02"
+      factor: 0.99007092
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華通）：前收 282 → 參考價 279.2，權值+息值 2.8（息）"
+    - date: "2026-06-22"
+      factor: 0.99283237
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華通）：前收 259.5 → 參考價 257.64，權值+息值 1.86（權）"
+  "2317":
+    - date: "2025-07-02"
+      factor: 0.96495468
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（鴻海）：前收 165.5 → 參考價 159.7，權值+息值 5.8（息）"
+    - date: "2026-07-02"
+      factor: 0.97104839
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（鴻海）：前收 248 → 參考價 240.82，權值+息值 7.18（息）"
+  "2330":
+    - date: "2024-09-12"
+      factor: 0.99554939
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 901 → 參考價 896.99，權值+息值 4.01（息）"
+    - date: "2024-12-12"
+      factor: 0.99617225
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 1045 → 參考價 1041，權值+息值 4（息）"
+    - date: "2025-03-18"
+      factor: 0.99535052
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 970 → 參考價 965.49，權值+息值 4.51（息）"
+    - date: "2025-06-12"
+      factor: 0.99576526
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 1065 → 參考價 1060.49，權值+息值 4.51（息）"
+    - date: "2025-09-16"
+      factor: 0.99600797
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 1255 → 參考價 1249.99，權值+息值 5.01（息）"
+    - date: "2025-12-11"
+      factor: 0.99667110
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 1505 → 參考價 1499.99，權值+息值 5.01（息）"
+    - date: "2026-03-17"
+      factor: 0.99674255
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 1845 → 參考價 1838.99，權值+息值 6.01（息）"
+    - date: "2026-06-11"
+      factor: 0.99733481
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（台積電）：前收 2255 → 參考價 2248.99，權值+息值 6.01（息）"
+  "2344":
+    - date: "2026-03-27"
+      factor: 0.99479167
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華邦電）：前收 96 → 參考價 95.5，權值+息值 0.5（息）"
+  "2345":
+    - date: "2025-07-30"
+      factor: 0.98708920
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（智邦）：前收 852 → 參考價 841，權值+息值 11（息）"
+    - date: "2026-07-30"
+      factor: 0.99214660
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（智邦）：前收 1910 → 參考價 1895，權值+息值 15（息）"
+  "2357":
+    - date: "2025-06-26"
+      factor: 0.95142857
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華碩）：前收 700 → 參考價 666，權值+息值 34（息）"
+    - date: "2026-07-01"
+      factor: 0.94000000
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（華碩）：前收 700 → 參考價 658，權值+息值 42（息）"
+  "2368":
+    - date: "2025-06-24"
+      factor: 0.97773655
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（金像電）：前收 269.5 → 參考價 263.5，權值+息值 6（息）"
+    - date: "2026-06-23"
+      factor: 0.99296774
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（金像電）：前收 1395 → 參考價 1385.19，權值+息值 9.81（息）"
+  "2376":
+    - date: "2025-07-30"
+      factor: 0.96460177
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（技嘉）：前收 282.5 → 參考價 272.5，權值+息值 10（息）"
+    - date: "2026-08-03"
+      factor: 0.96433878
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（技嘉）：前收 336.5 → 參考價 324.5，權值+息值 12（息）"
+  "2379":
+    - date: "2024-09-05"
+      factor: 0.96960784
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（瑞昱）：前收 510 → 參考價 494.5，權值+息值 15.5（息）"
+    - date: "2025-09-10"
+      factor: 0.95277778
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（瑞昱）：前收 540 → 參考價 514.5，權值+息值 25.5（息）"
+  "2382":
+    - date: "2025-06-30"
+      factor: 0.95446585
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（廣達）：前收 285.5 → 參考價 272.5，權值+息值 13（息）"
+    - date: "2026-07-16"
+      factor: 0.95905512
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（廣達）：前收 381 → 參考價 365.4，權值+息值 15.6（息）"
+  "2408":
+    - date: "2026-07-07"
+      factor: 0.99678954
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（南亞科）：前收 420.5 → 參考價 419.15，權值+息值 1.35（息）"
+  "2412":
+    - date: "2025-07-03"
+      factor: 0.96282528
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（中華電）：前收 134.5 → 參考價 129.5，權值+息值 5（息）"
+    - date: "2026-07-09"
+      factor: 0.96272401
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（中華電）：前收 139.5 → 參考價 134.3，權值+息值 5.2（息）"
+  "2454":
+    - date: "2025-01-02"
+      factor: 0.97950530
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯發科）：前收 1415 → 參考價 1386，權值+息值 29（息）"
+    - date: "2025-07-03"
+      factor: 0.98068726
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯發科）：前收 1295 → 參考價 1269.99，權值+息值 25.01（息）"
+    - date: "2026-01-06"
+      factor: 0.98098361
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯發科）：前收 1525 → 參考價 1496，權值+息值 29（息）"
+    - date: "2026-07-07"
+      factor: 0.99405818
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯發科）：前收 4125 → 參考價 4100.49，權值+息值 24.51（息）"
+  "2603":
+    - date: "2025-06-19"
+      factor: 0.86815416
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（長榮）：前收 246.5 → 參考價 214，權值+息值 32.5（息）"
+    - date: "2026-06-17"
+      factor: 0.92743764
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（長榮）：前收 220.5 → 參考價 204.5，權值+息值 16（息）"
+  "2609":
+    - date: "2025-07-09"
+      factor: 0.89597781
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（陽明）：前收 72.1 → 參考價 64.6，權值+息值 7.5（息）"
+    - date: "2026-07-14"
+      factor: 0.96007984
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（陽明）：前收 50.1 → 參考價 48.1，權值+息值 2（息）"
+  "2618":
+    - date: "2025-07-09"
+      factor: 0.94022416
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（長榮航）：前收 40.15 → 參考價 37.75，權值+息值 2.4（息）"
+    - date: "2026-07-08"
+      factor: 0.95283019
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（長榮航）：前收 42.4 → 參考價 40.4，權值+息值 2（息）"
+  "2881":
+    - date: "2024-09-09"
+      factor: 0.95232432
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦金）：前收 92.5 → 參考價 88.09，權值+息值 4.41（權）"
+    - date: "2025-07-01"
+      factor: 0.95131730
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦金）：前收 87.3 → 參考價 83.05，權值+息值 4.25（息）"
+    - date: "2025-09-25"
+      factor: 0.97550562
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦金）：前收 89 → 參考價 86.82，權值+息值 2.18（權）"
+    - date: "2026-07-01"
+      factor: 0.96718147
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（富邦金）：前收 129.5 → 參考價 125.25，權值+息值 4.25（息）"
+  "2891":
+    - date: "2025-07-14"
+      factor: 0.94732041
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（中信金）：前收 43.85 → 參考價 41.54，權值+息值 2.31（息）"
+    - date: "2026-07-10"
+      factor: 0.96409156
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（中信金）：前收 69.9 → 參考價 67.39，權值+息值 2.51（息）"
+  "2912":
+    - date: "2025-07-31"
+      factor: 0.96571429
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（統一超）：前收 262.5 → 參考價 253.5，權值+息值 9（息）"
+    - date: "2026-07-30"
+      factor: 0.96265560
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（統一超）：前收 241 → 參考價 232，權值+息值 9（息）"
+  "3008":
+    - date: "2025-03-20"
+      factor: 0.97722772
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（大立光）：前收 2525 → 參考價 2467.5，權值+息值 57.5（息）"
+    - date: "2025-08-14"
+      factor: 0.98842975
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（大立光）：前收 2420 → 參考價 2392，權值+息值 28（息）"
+    - date: "2026-03-19"
+      factor: 0.97868852
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（大立光）：前收 2440 → 參考價 2388，權值+息值 52（息）"
+    - date: "2026-08-13"
+      factor: 0.99094875
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（大立光）：前收 4585 → 參考價 4543.5，權值+息值 41.5（息）"
+  "3017":
+    - date: "2025-08-19"
+      factor: 0.99131878
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（奇鋐）：前收 1145 → 參考價 1135.06，權值+息值 9.94（息）"
+    - date: "2026-08-19"
+      factor: 0.99311697
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（奇鋐）：前收 3035 → 參考價 3014.11，權值+息值 20.89（息）"
   "3034":
-    - date: "2026-07-13"
-      factor: 0.91143911
+    - date: "2025-07-09"
+      factor: 0.94756554
       kind: dividend
-      source: detected
-      ignore: true
-      note: "疑似除權息：542 → 467.5；此因子由開盤價估算，請填入公告的除權息參考價後把 ignore 拿掉"
+      source: twse
+      note: "TWSE 除權息結果表（聯詠）：前收 534 → 參考價 506，權值+息值 28（息）"
+    - date: "2026-07-10"
+      factor: 0.95756458
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯詠）：前收 542 → 參考價 519，權值+息值 23（息）"
+  "3037":
+    - date: "2025-07-10"
+      factor: 0.98767347
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（欣興）：前收 122.5 → 參考價 120.99，權值+息值 1.51（息）"
+    - date: "2025-11-14"
+      factor: 0.98974790
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（欣興）：前收 178.5 → 參考價 176.67，權值+息值 1.83（權）"
+    - date: "2026-07-06"
+      factor: 0.99794634
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（欣興）：前收 969 → 參考價 967.01，權值+息值 1.99（息）"
+  "3231":
+    - date: "2025-06-03"
+      factor: 0.96695652
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（緯創）：前收 115 → 參考價 111.2，權值+息值 3.8（息）"
+    - date: "2026-07-08"
+      factor: 0.96456592
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（緯創）：前收 155.5 → 參考價 149.99，權值+息值 5.51（息）"
+  "3443":
+    - date: "2025-06-03"
+      factor: 0.98538813
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（創意）：前收 1095 → 參考價 1079，權值+息值 16（息）"
+    - date: "2026-06-08"
+      factor: 0.99546485
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（創意）：前收 4410 → 參考價 4390，權值+息值 20（息）"
+  "3661":
+    - date: "2024-09-12"
+      factor: 0.99018381
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（世芯-KY）：前收 2285 → 參考價 2262.57，權值+息值 22.43（息）"
+    - date: "2025-09-02"
+      factor: 0.99068199
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（世芯-KY）：前收 3915 → 參考價 3878.52，權值+息值 36.48（息）"
+  "3711":
+    - date: "2025-07-02"
+      factor: 0.96357388
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（日月光投控）：前收 145.5 → 參考價 140.2，權值+息值 5.3（息）"
+    - date: "2026-07-03"
+      factor: 0.99093535
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（日月光投控）：前收 727 → 參考價 720.41，權值+息值 6.59（息）"
+  "4904":
+    - date: "2025-07-09"
+      factor: 0.95940707
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（遠傳）：前收 87.7 → 參考價 84.14，權值+息值 3.56（息）"
+    - date: "2026-07-08"
+      factor: 0.96300971
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（遠傳）：前收 103 → 參考價 99.19，權值+息值 3.81（息）"
+  "6213":
+    - date: "2025-07-03"
+      factor: 0.97949886
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯茂）：前收 87.8 → 參考價 86，權值+息值 1.8（息）"
+    - date: "2026-07-02"
+      factor: 0.99166667
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（聯茂）：前收 360 → 參考價 357，權值+息值 3（息）"
+  "6669":
+    - date: "2025-06-24"
+      factor: 0.97098039
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（緯穎）：前收 2550 → 參考價 2476，權值+息值 74（息）"
+    - date: "2026-06-22"
+      factor: 0.97185185
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（緯穎）：前收 5130 → 參考價 4985.6，權值+息值 144.4（息）"
+  "8046":
+    - date: "2025-07-03"
+      factor: 0.99122807
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（南電）：前收 114 → 參考價 113，權值+息值 1（息）"
+    - date: "2026-06-25"
+      factor: 0.99790576
+      kind: dividend
+      source: twse
+      note: "TWSE 除權息結果表（南電）：前收 955 → 參考價 953，權值+息值 2（息）"

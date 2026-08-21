@@ -159,7 +159,9 @@ def main() -> int:
 
     if not args.quiet:
         print("抓取全市場收盤行情…", file=sys.stderr)
-    quotes = datasource.fetch_quotes(raw_dir=None if args.dry_run else RAW_DIR)
+    quotes = datasource.fetch_quotes(
+        raw_dir=None if args.dry_run else RAW_DIR, warnings=warnings
+    )
     trade_date = datasource.market_date(quotes) or date.today().isoformat()
 
     stale_days = datasource.is_stale(trade_date)
