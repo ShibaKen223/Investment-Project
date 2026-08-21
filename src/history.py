@@ -212,11 +212,40 @@ def load_bars(code: str) -> list[Bar]:
     return bars
 
 
+def load_bars_adjusted(code: str) -> list[Bar]:
+    """讀出**還原權值後**的日 K —— 做分析的都該用這支。
+
+    load_bars() 回傳的是檔案裡的原始價格，也就是當天真正成交的數字。
+    那是磁碟上的事實，寫檔時必須用它；但拿來算均線、期間報酬、
+    停損停利就會出事，因為除權息與股票分割會在序列裡留下假斷崖
+    （0050 在 2025-06-18 是一根 -74.8% 的 K，實際上是 1 拆 4）。
+
+    為什麼不直接讓 load_bars 預設還原：save_bars() 內部會先 load 再合併寫回，
+    如果 load 出來是還原後的價格，第一次存檔就會把還原值寫進檔案，
+    之後每存一次再還原一次——原始資料就永久毀了。
+    所以「寫檔用原始、分析用還原」這條界線要很清楚。
+
+    公司行為登記在 config/corporate_actions.yaml，見 src/adjust.py。
+    """
+    import adjust
+
+    bars = load_bars(code)
+    if not bars:
+        return bars
+    actions = adjust.load_actions().get(code)
+    if not actions:
+        return bars
+    return adjust.apply_actions(bars, actions)
+
+
 def save_bars(code: str, bars: list[Bar]) -> int:
     """合併寫入。同一天以新資料覆蓋，回傳寫入後的總筆數。
 
     合併而不是覆寫，是為了讓「從 raw 重建」和「從 TWSE 補歷史」
     可以混用，兩邊各補各的區間不會互相清掉。
+
+    ⚠️ 這裡的 load_bars() 一定要是**未還原**的版本。
+       寫回檔案的必須是當天實際成交的價格，還原只發生在讀出來做分析的時候。
     """
     with _exclusive(code):
         # 讀取也要在鎖內：讀完才合併，中間不能有別人插進來寫，

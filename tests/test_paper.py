@@ -688,6 +688,129 @@ check(
 
 # ==========================================================================
 print()
+print("--- 資料不足的那天不算數，不能把 last_date 記掉 ---")
+# ==========================================================================
+# 真實事故：2026-08-20 早上執行時 data/history/ 幾乎是空的，
+# 掃描池 40 檔沒幾檔有 61 根 K，於是「今天沒有訊號」——但那是假的，
+# 它只代表沒東西可看。系統照樣寫下 last_date="2026-08-20"，
+# 當天稍晚補齊歷史後重跑，得到的是「今天已經跑過」，那一天就此永久消失。
+#
+# 事後用補齊的資料重算，2603 其實成立（突破前 20 日高點 242，收 246）。
+# 下面守的就是這件事：資料不足時整段不算數，補完資料重跑同一天要能補回來。
+
+import history as _history        # noqa: E402
+import paperdaily                 # noqa: E402
+
+_guard_tmp = Path(tempfile.mkdtemp(prefix="paper-guard-"))
+paper.DATA_DIR = _guard_tmp
+paper.TRADES_FILE = _guard_tmp / "paper_trades.jsonl"
+paper.EQUITY_FILE = _guard_tmp / "paper_equity.jsonl"
+paper.STATE_FILE = _guard_tmp / "paper_state.json"
+paper.RUNS_FILE = _guard_tmp / "paper_runs.jsonl"
+
+_GUARD_DAY = _crash_bars[-1].date
+_rich = seq_bars([100.0 + i * 0.5 for i in range(80)])
+_rich_day = _rich[-1].date
+
+_orig_universe = _history.universe_from_config
+_orig_load_bars = _history.load_bars
+_orig_load_config = paperdaily.load_config
+
+_fake_history: dict[str, list] = {}
+
+
+def _install_fake_history(bars_by_code: dict, min_ready: int) -> None:
+    _fake_history.clear()
+    _fake_history.update(bars_by_code)
+    _history.universe_from_config = lambda: list(_fake_history)
+    _history.load_bars = lambda code, *a, **k: _fake_history.get(code, [])
+    paperdaily.load_config = lambda: {
+        "enabled": True,
+        "account": {"initial_cash": 1_000_000, "position_pct": 20.0, "max_positions": 5},
+        "strategy": {"max_hold_bars": 999},
+        "data_guard": {"min_ready_codes": min_ready},
+    }
+
+
+# 情境一：掃描池有 3 檔，但全部只有 5 根 K，門檻要求 10 檔 → 今天不算數
+_install_fake_history({f"900{i}": flat_bars(5) for i in range(3)}, min_ready=10)
+_thin = paperdaily.run_daily(_GUARD_DAY, {}, dry_run=False)
+check(
+    "資料不足時回報「今天不算數」而不是「今天沒有訊號」",
+    _thin.get("insufficient") is True,
+    str(_thin)[:120],
+)
+check(
+    "資料不足時不會寫出狀態檔（last_date 沒有被記掉）",
+    not paper.STATE_FILE.exists(),
+)
+check(
+    "資料不足時不會污染淨值曲線",
+    not paper.EQUITY_FILE.exists(),
+)
+check(
+    "訊息要講清楚補完資料可以重跑，不是叫人放棄",
+    "重跑" in _thin.get("skipped", ""),
+    _thin.get("skipped", "")[:120],
+)
+
+# 情境二：同一天，資料補齊了 → 這次要真的跑起來，並記下 last_date
+_install_fake_history({f"900{i}": _rich for i in range(12)}, min_ready=10)
+_ok = paperdaily.run_daily(_rich_day, {}, dry_run=False)
+check(
+    "資料補齊後同一個交易日可以補跑（沒有被永久鎖住）",
+    "result" in _ok,
+    str(_ok)[:120],
+)
+check(
+    "補跑之後才寫入狀態檔",
+    paper.STATE_FILE.exists()
+    and paper.load_state(1_000_000.0).last_date == _rich_day,
+)
+
+# 情境三：門檻設 0 = 明確關掉保護，維持舊行為
+_install_fake_history({"9001": flat_bars(5)}, min_ready=0)
+_off = paperdaily.run_daily("2026-12-31", {}, dry_run=False)
+check(
+    "門檻設 0 就不擋（保護是可以關掉的，但要明確寫出來）",
+    _off.get("insufficient") is None,
+    str(_off)[:120],
+)
+
+# 稽核紀錄：每一次執行都要留下一行，包含「掃了幾檔、幾檔資料夠」
+_runs = paper.load_runs()
+check(
+    "每次執行都留下稽核紀錄",
+    len(_runs) == 3,
+    f"得到 {len(_runs)} 行",
+)
+check(
+    "稽核紀錄記下了資料不足的原因與當時的檔數",
+    _runs and _runs[0]["status"] == "insufficient_data"
+    and _runs[0]["ready"] == 0 and _runs[0]["universe"] == 3,
+    str(_runs[0]) if _runs else "(空)",
+)
+check(
+    "成功執行那次記下了訊號數與淨值",
+    len(_runs) > 1 and _runs[1]["status"] == "ok" and "equity" in _runs[1],
+    str(_runs[1]) if len(_runs) > 1 else "(空)",
+)
+
+# dry-run 不留任何痕跡，跟其他寫檔路徑一致
+_before = len(paper.load_runs())
+paperdaily.run_daily("2026-12-30", {}, dry_run=True)
+check(
+    "dry-run 不寫稽核紀錄",
+    len(paper.load_runs()) == _before,
+)
+
+_history.universe_from_config = _orig_universe
+_history.load_bars = _orig_load_bars
+paperdaily.load_config = _orig_load_config
+
+
+# ==========================================================================
+print()
 if FAILURES:
     print(f"{len(FAILURES)} 項失敗 ❌")
     for name in FAILURES:

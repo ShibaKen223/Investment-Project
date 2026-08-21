@@ -176,6 +176,73 @@ def build_paper_section(paper_data: dict | None) -> list[str]:
     return lines
 
 
+def _build_reconcile_section(evaluations: list[Evaluation]) -> list[str]:
+    """程式交易模式的覆盤區：對帳，不是問理由。
+
+    停損停利訊號在這個模式下的意義變了。手動模式下它是「你該賣了」；
+    自動模式下程式自己會賣，所以訊號變成一個**檢查點**：
+
+        規則說這檔早該出場了，但它還在持股清單裡——為什麼？
+
+    答案通常是程式出了狀況（API 斷線、委託被退、部位卡住），
+    而那種事在券商 App 上看不出來，只有每日對帳會浮出來。
+    """
+    lines = ["## 實倉對帳", ""]
+    lines.append(
+        "> 這一段是**稽核**，不是叫你手動下單。持股由 `data/fills.csv` "
+        "同步而來，程式自己會進出場。"
+        "這裡要回答的是：**程式現在的行為跟它自己的規則對得起來嗎？**"
+    )
+    lines.append("")
+
+    stale = [ev for ev in evaluations if ev.signal.is_actionable]
+    if stale:
+        lines.append(
+            "### 🚨 規則說該出場，但部位還在"
+        )
+        lines.append("")
+        for ev in stale:
+            pos = ev.position
+            name = ev.quote.name if ev.quote else pos.code
+            reason = (
+                f"已跌破停損線 {_price(ev.stop_price)}"
+                if ev.signal is Signal.STOP_LOSS
+                else f"已突破停利線 {_price(ev.target_price)}"
+            )
+            lines.append(
+                f"- **{pos.code} {name}**：{reason}（{_pct(ev.pnl_pct)}）"
+            )
+        lines.append("")
+        lines.append(
+            "> 這通常代表三件事之一：程式今天沒跑、委託送出去被退掉、"
+            "或是它的出場規則跟 `config/strategy.yaml` 這裡設的不一樣。"
+            "**前兩者要立刻處理，第三者要把兩邊的參數對齊**，"
+            "否則這份報告之後每天都會叫，你就會開始無視它。"
+        )
+        lines.append("")
+    else:
+        lines.append("- ✅ 目前所有部位都還在規則允許的範圍內，沒有該出場而未出場的。")
+        lines.append("")
+
+    unknown = [ev for ev in evaluations if ev.quote is None]
+    if unknown:
+        codes = "、".join(ev.position.code for ev in unknown)
+        lines.append(
+            f"- ⚠️ {codes} 查無當日行情，這幾檔今天沒有被稽核到"
+            "（可能是停牌、代號錯誤，或資料源缺漏）。"
+        )
+        lines.append("")
+
+    for ev in evaluations:
+        for note in ev.notes:
+            lines.append(f"- ⚠️ {ev.position.code}：{note}")
+
+    if any(ev.notes for ev in evaluations):
+        lines.append("")
+
+    return lines
+
+
 def build_report(
     *,
     trade_date: str,
@@ -186,6 +253,7 @@ def build_report(
     watchlist: list[tuple[dict, Quote | None]],
     warnings: list[str],
     paper_data: dict | None = None,
+    mode: str = "manual",
 ) -> str:
     lines: list[str] = []
 
@@ -292,23 +360,33 @@ def build_report(
     )
     lines.append("")
 
-    # --- 當初的買進理由（覆盤用）---
-    lines.append("## 當初的買進理由")
-    lines.append("")
-    lines.append(
-        "> 每天看一次。如果理由已經不成立，就算沒到停損線也該考慮出場；"
-        "如果理由還成立，就算帳面虧損也不必恐慌。"
-    )
-    lines.append("")
-    for ev in evaluations:
-        pos = ev.position
-        name = ev.quote.name if ev.quote else pos.code
-        lines.append(f"**{pos.code} {name}**（{pos.entry_date} 進場，{_pct(ev.pnl_pct)}）")
-        lines.append(f"- 買進理由：{pos.thesis or '（未填寫）'}")
-        lines.append(f"- 認錯條件：{pos.invalidate or '（未填寫）'}")
-        for note in ev.notes:
-            lines.append(f"- ⚠️ {note}")
+    # --- 覆盤區 ---
+    # 手動選股與程式交易要問的問題完全不一樣，所以這一整段跟著 mode 換。
+    #
+    #   manual：問「當初的理由還成立嗎」——防的是抱著一個已經錯掉的判斷。
+    #   auto  ：程式沒有「理由」，只有規則。該問的是「程式有沒有照規則走」，
+    #           因為全自動交易最常見的壞法不是策略失效，是程式安靜地壞掉。
+    if mode == "auto":
+        lines.extend(_build_reconcile_section(evaluations))
+    else:
+        lines.append("## 當初的買進理由")
         lines.append("")
+        lines.append(
+            "> 每天看一次。如果理由已經不成立，就算沒到停損線也該考慮出場；"
+            "如果理由還成立，就算帳面虧損也不必恐慌。"
+        )
+        lines.append("")
+        for ev in evaluations:
+            pos = ev.position
+            name = ev.quote.name if ev.quote else pos.code
+            lines.append(
+                f"**{pos.code} {name}**（{pos.entry_date} 進場，{_pct(ev.pnl_pct)}）"
+            )
+            lines.append(f"- 買進理由：{pos.thesis or '（未填寫）'}")
+            lines.append(f"- 認錯條件：{pos.invalidate or '（未填寫）'}")
+            for note in ev.notes:
+                lines.append(f"- ⚠️ {note}")
+            lines.append("")
 
     # --- 觀察清單 ---
     if watchlist:

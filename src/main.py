@@ -145,6 +145,12 @@ def main() -> int:
     overrides = strategy.get("overrides") or {}
     overrides = {str(k): v for k, v in overrides.items() if v}
     objective = str(strategy.get("objective", "（尚未設定目標）"))
+    # manual = 人工選股（報告問「當初的理由還成立嗎」）
+    # auto   = 程式交易（報告改成對帳：「程式有沒有照規則走」）
+    mode = str(strategy.get("mode", "manual")).strip().lower()
+    if mode not in ("manual", "auto"):
+        warnings.append(f"strategy.yaml 的 mode 寫了看不懂的值 {mode!r}，暫以 manual 處理。")
+        mode = "manual"
 
     all_positions, watchlist_cfg = load_positions(positions_cfg)
     positions = [p for p in all_positions if p.is_open]
@@ -162,6 +168,33 @@ def main() -> int:
             f"行情日期為 {trade_date}，距今 {stale_days} 天。"
             "可能是連假，或資料源尚未更新——判讀訊號前請先確認。"
         )
+
+    # --- 除權息偵測 ---
+    # 除息當天股價會真的跌下去，但那不是虧損——你拿到了現金。
+    # 不講清楚的話，一檔配息 8% 的股票會在除息當天直接觸發 10% 停損，
+    # 而報告上會寫著「跌破停損線，規則判定該出場」。那是最貴的一種假訊號。
+    ex_rights: dict[str, object] = {}
+    if positions or watchlist_cfg:
+        try:
+            import adjust
+
+            watched = [str(e.get("code", "")).strip() for e in watchlist_cfg]
+            detected = adjust.scan_quotes(
+                quotes, [p.code for p in positions] + watched
+            )
+            ex_rights = {a.code: a for a in detected}
+            if not args.dry_run:
+                adjust.record_detected(detected)
+            for action in detected:
+                held = " ← 你有這檔部位，今天的停損訊號不可信"
+                warnings.append(
+                    f"🔔 {action.code} 今天疑似除權息"
+                    f"（參考價較昨收 {(action.factor - 1) * 100:+.1f}%）。"
+                    "當天的價格下跌是配息造成的，不是虧損。"
+                    f"{held if any(p.code == action.code for p in positions) else ''}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"除權息偵測失敗（不影響其他判斷）：{exc}")
 
     peaks = load_peaks(positions)
 
@@ -204,6 +237,7 @@ def main() -> int:
         watchlist=watchlist,
         warnings=warnings,
         paper_data=paper_data,
+        mode=mode,
     )
 
     if not args.quiet:
