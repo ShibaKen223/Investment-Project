@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 
-{% if objective %}
+{% if objective_unset %}
+  {# 出廠預設值就別假裝那是你的目標——空白比一句沒人寫過的話誠實 #}
+  <div class="objective objective-unset">
+    <b>還沒設定你的投資目標</b>
+    這一行會印在每天報告的最上面，用來提醒你自己到底在最佳化什麼。
+    寫成一句可量測的話，例如「12 個月內做出可支配現金流，整體最大回撤不超過 15%」。
+    <a href="{{ url_for('settings') }}">現在去寫</a>
+  </div>
+{% elif objective %}
   <div class="objective"><b>目標</b>　{{ objective }}</div>
 {% endif %}
 

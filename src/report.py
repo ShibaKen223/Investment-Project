@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from datasource import Quote
-from portfolio import Evaluation, Signal
+from portfolio import Evaluation, Signal, objective_is_unset
 from strategy import exit_levels
 
 
@@ -191,7 +191,13 @@ def build_report(
 
     lines.append(f"# 投資日報 · {trade_date}")
     lines.append("")
-    lines.append(f"> **目標**：{objective.strip()}")
+    if objective_is_unset(objective):
+        lines.append(
+            "> **目標**：還沒設定。到儀表板的「規則設定」頁寫一句你自己在"
+            "最佳化什麼（要可量測），它就會印在這裡，每天提醒你一次。"
+        )
+    else:
+        lines.append(f"> **目標**：{objective.strip()}")
     lines.append("")
     lines.append(
         f"*行情日期 {trade_date} ｜ 產生時間 "

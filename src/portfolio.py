@@ -70,6 +70,21 @@ class Position:
         return (today - entered).days
 
 
+# strategy.yaml 出廠時 objective 裡帶的那句話。用它認出「還沒改過」。
+DEFAULT_OBJECTIVE_MARKER = "這是預設範例"
+
+
+def objective_is_unset(objective: str | None) -> bool:
+    """目標還停在出廠預設值嗎。
+
+    這一行每天印在報告和畫面的最上面，看起來就像已經設定好了。
+    分辨得出來才有辦法提醒你去寫自己的——
+    一個沒人真心寫過的目標比沒有目標更糟，它會讓你以為自己有紀律。
+    """
+    text = (objective or "").strip()
+    return not text or DEFAULT_OBJECTIVE_MARKER in text
+
+
 @dataclass
 class Rules:
     stop_loss_pct: float = 10.0

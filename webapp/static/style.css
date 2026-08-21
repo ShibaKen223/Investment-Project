@@ -79,6 +79,13 @@ nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
   color: var(--text-dim); margin-bottom: 18px;
 }
 .objective b { color: var(--text); font-weight: 600; }
+/* 還沒設定：用虛線邊框表示「這一格是空的、等你填」，
+   而不是實線的「這是一則資訊」。 */
+.objective.objective-unset {
+  border-left-style: dashed;
+  border-left-color: var(--text-dim);
+}
+.objective.objective-unset b { display: block; margin-bottom: 3px; }
 
 button, .btn {
   font: inherit; font-size: 14px; cursor: pointer;

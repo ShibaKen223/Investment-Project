@@ -35,6 +35,7 @@ from portfolio import (  # noqa: E402
     Signal,
     evaluate,
     load_peaks,
+    objective_is_unset,
     resolve_rules,
     summarize,
 )
@@ -292,6 +293,7 @@ def build_view(force_refresh: bool = False) -> dict:
 
     return {
         "objective": objective,
+        "objective_unset": objective_is_unset(objective),
         "rules": base_rules,
         "trade_date": trade_date,
         "fetched_at": fetched_at,

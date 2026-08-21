@@ -428,9 +428,17 @@ python3 src/backtest.py --verbose        # 印出每一筆成交
 ## 測試
 
 ```bash
-python3 tests/test_signals.py     # 停損停利判斷的 13 條分支
+python3 tests/run_all.py          # 一次跑完（失敗時結束碼 1，可掛排程或 git hook）
+python3 tests/run_all.py -v       # 連每一項 PASS/FAIL 都印出來
+```
+
+想單獨跑某一支：
+
+```bash
+python3 tests/test_signals.py     # 停損停利判斷的分支、移動停損峰值的起算日
 python3 tests/test_store.py       # 透過介面改設定不會弄壞 YAML
-python3 tests/test_paper.py       # 交易成本、進出場訊號、成交、名額上限
+python3 tests/test_paper.py       # 交易成本、進出場訊號、成交、名額上限、
+                                  #   累計績效的來源、狀態檔壞掉的行為
 python3 tests/test_history.py     # 日 K 存取、民國日期、TWSE 解析
 python3 tests/test_backtest.py    # 回測引擎的不變式（合成資料，不連網）
 python3 tests/test_research.py    # 指標計算、ATR、名詞查詢、知識庫完整性
