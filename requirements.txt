@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # 行情抓取與設定檔讀取
 requests>=2.31
 PyYAML>=6.0

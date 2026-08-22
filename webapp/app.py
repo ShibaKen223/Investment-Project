@@ -16,6 +16,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+# Windows 的主控台預設是 GBK/cp950，而這支程式的輸出全是中文，還帶著
+# ⚠ 🔴 之類的符號——不改編碼的話，一遇到 GBK 放不進去的字元就直接
+# UnicodeEncodeError 中斷，報告只印出前面半段。tests/ 底下每一支都做了
+# 同樣的事（見 commit 00c43f2），但正式的進入點當時漏掉了。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 from flask import (  # noqa: E402
     Flask,
     flash,
@@ -108,12 +116,41 @@ def _sparkline_svg(points: list[dict], width: int = 640, height: int = 90, pad: 
     )
 
 
-# 每日排程（launch/install_daily.sh 裝的那個）。
+# 每日排程。兩個平台裝的東西不一樣，要各自去問各自的排程系統：
+#   macOS   launch/install_daily.sh   → LaunchAgent plist
+#   Windows launch/win/install_daily.ps1 → 工作排程器裡的一個工作
 SCHEDULE_PLIST = (
     Path.home() / "Library" / "LaunchAgents" / "local.investment.daily.plist"
 )
+SCHEDULE_TASK_NAME = "InvestmentDailyUpdate"
 # 幾天沒跑就算不正常。抓 4 天是為了容忍「週五跑完 → 週一才開機」再加一天連假。
 SCHEDULE_STALE_DAYS = 4
+
+
+def _schedule_installed() -> bool:
+    """排程裝了沒。問錯平台的話會永遠回答「沒裝」。
+
+    這個函式回傳 False 的代價是畫面上會跳一個「自動更新沒在跑」的橫幅。
+    橫幅本身是對的設計，但如果它在排程明明有裝的機器上天天出現，
+    使用者很快就會學會無視它——那等於把這個警告整個作廢掉。
+    """
+    if sys.platform == "win32":
+        try:
+            import subprocess
+
+            probe = subprocess.run(
+                ["schtasks", "/Query", "/TN", SCHEDULE_TASK_NAME],
+                capture_output=True,
+                # 排程器的輸出是本地編碼（cp950/GBK），不是 UTF-8。
+                # 這裡只看結束碼，所以解碼失敗也不能讓它拋例外。
+                encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return probe.returncode == 0
+        except (OSError, ValueError):
+            return False
+    return SCHEDULE_PLIST.exists()
 
 
 def _schedule_status() -> dict:
@@ -139,9 +176,8 @@ def _schedule_status() -> dict:
             continue
 
     days_since = (date.today() - last_run.date()).days if last_run else None
-    installed = SCHEDULE_PLIST.exists()
     return {
-        "installed": installed,
+        "installed": _schedule_installed(),
         "last_run": last_run,
         "days_since": days_since,
         "stale": days_since is None or days_since > SCHEDULE_STALE_DAYS,

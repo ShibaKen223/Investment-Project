@@ -489,7 +489,13 @@ try:
     import threading as _threading
     import time as _time
 
-    limiter = history._RateLimiter(0.05)
+    # 間隔用 0.2 秒而不是 0.05。限速器本身在兩種間隔下都是對的，
+    # 但這幾條檢查量的是「執行緒實際醒來的時刻」，而 Windows 的 sleep
+    # 解析度大約 15.6ms——50ms 間隔配 40ms 的容許值，光是作業系統的
+    # 排程抖動就足以讓相鄰兩筆被判定成「送得太密」，大約每三次跑就紅一次。
+    # 拉大間隔之後抖動相對可忽略，這樣紅字就一定代表限速器真的壞了。
+    INTERVAL = 0.2
+    limiter = history._RateLimiter(INTERVAL)
     stamps: list[float] = []
     stamps_lock = _threading.Lock()
 
@@ -510,17 +516,17 @@ try:
     gaps = [b - a for a, b in zip(stamps, stamps[1:])]
     check(
         "10 個請求分散在 4+ 個執行緒，仍照全域間隔排隊",
-        elapsed >= 9 * 0.05 * 0.9,
-        f"只花了 {elapsed:.3f}s，應至少 {9 * 0.05:.3f}s",
+        elapsed >= 9 * INTERVAL * 0.9,
+        f"只花了 {elapsed:.3f}s，應至少 {9 * INTERVAL:.3f}s",
     )
     check(
         "任兩個請求之間都有間隔（併發沒有讓發送變密）",
-        all(g >= 0.05 * 0.8 for g in gaps),
+        all(g >= INTERVAL * 0.8 for g in gaps),
         f"最小間隔 {min(gaps):.4f}s",
     )
     check(
         "但也沒有比必要的更慢（沒有累加等待）",
-        elapsed < 9 * 0.05 * 2.5,
+        elapsed < 9 * INTERVAL * 2.5,
         f"花了 {elapsed:.3f}s",
     )
 
