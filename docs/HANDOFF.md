@@ -4,7 +4,7 @@
 > 五分鐘內知道現在到哪了」。不是變更紀錄——那個看 git log 就有。
 > 只寫**從程式碼裡看不出來**的東西：為什麼這樣做、什麼還沒驗證、下一步卡在哪。
 
-最後更新：2026-08-21
+最後更新：2026-08-22
 
 ---
 
@@ -128,17 +128,83 @@ py webapp/app.py             # 開儀表板看 engine 模式的畫面
 
 ---
 
+---
+
+## 2026-08-22：Windows 環境實際跑起來了
+
+上一輪列的「沒驗證的」三項，前兩項做完了：**儀表板真的開起來看過**
+（六個路由都回 200），**`main.py` 完整跑過一次**（`--dry-run` 與排程各一次）。
+第三項（引擎有部位時的畫面）還是空的，因為引擎目前就是 0 檔。
+
+過程中撞到的幾乎都是同一類問題：**這個專案在 macOS 上寫的，很多地方假設了 POSIX。**
+
+### 修掉的
+
+| 問題 | 症狀 | 修法 |
+| --- | --- | --- |
+| `requirements.txt` 沒有 BOM | `pip install -r` 用 cp936 讀中文註解直接 `UnicodeDecodeError`，套件一個都裝不了 | 加 PEP 263 的 `# -*- coding: utf-8 -*-` |
+| 五個進入點沒有 `reconfigure` | `py src/main.py` 印到 ⚠️ 就 `UnicodeEncodeError` 中斷，報告只出來半截 | 比照 `tests/` 的做法補上（`00c43f2` 當時只修了測試） |
+| `history.py` 在 Windows 沒有跨行程鎖 | `fcntl` 不存在時只剩執行緒鎖，兩個行程還共用同一個 `.tmp` 檔名 | 加 `msvcrt` 檔案鎖、暫存檔名帶 PID、`os.replace` 重試 |
+| 限速器測試 flaky | 約每三次紅一次，紅的是 Windows `sleep` 的 15.6ms 抖動不是限速器 | 測試間隔 0.05 → 0.2 秒，讓抖動相對可忽略 |
+| 儀表板查排程查錯平台 | 只看 macOS 的 LaunchAgent plist，Windows 上永遠回「沒裝」 | `_schedule_installed()` 依平台分流，Windows 查 `schtasks` |
+
+那個檔案鎖的洞值得多講一句：README 明講「手動回補撞上 15:00 排程是安全的」，
+在 Windows 上**那句話原本是假的**。而且它壞的方式很難發現——
+`os.replace` 丟 `PermissionError` 算好的，更糟的是兩邊各自把同一個 `.tmp`
+搬過去，結果檔案是完整的、內容是錯的，不會有任何錯誤訊息。
+
+### 新增的 `launch/win/`
+
+macOS 那套 `.app` ＋ LaunchAgent 的對應物：
+
+```
+安裝.bat / install.ps1          裝套件 → 跑測試 → 建桌面捷徑 → 問要不要補歷史和開排程
+投資儀表板.bat / dashboard.ps1   沒在跑就啟動，已經在跑就開分頁
+投資工具箱.bat / toolbox.ps1     編號選單，長工作就在同一個視窗裡跑
+install_daily.ps1               工作排程器版的每日排程（工作名 InvestmentDailyUpdate）
+daily_run.ps1                   排程實際執行的包裝，負責把輸出接進 data/daily.log
+_lib.ps1                        共用：路徑解析、Python 偵測、UTF-8 主控台、啟動儀表板
+```
+
+三個 Windows 特有的坑，改的時候別踩回去：
+
+1. **`.ps1` 一定要存成 UTF-8 with BOM。** Windows PowerShell 5.1 沒有 BOM
+   就當 ANSI 讀，整份中文變亂碼。
+2. **`.bat` 的內容必須全 ASCII。** cmd.exe 用 OEM 編碼（這台是 GBK）解析批次檔內容，
+   中文路徑會變亂碼然後「找不到檔案」。所以 `.ps1` 用 ASCII 檔名，
+   中文只留在使用者看得到的 `.bat` 檔名上。
+3. **別把 `TcpClient` ＋ `cmd.exe` 重導向 ＋ `-WindowStyle Hidden` 湊在一起。**
+   那是 PowerShell reverse shell 的招牌組合，Windows Defender 會把整個 `.ps1`
+   判成惡意程式並鎖住檔案（實際發生過一次）。查連接埠改用
+   `Get-NetTCPConnection`，啟動子行程直接用 `Start-Process` 分別導向兩個檔。
+
+### 這台機器目前的狀態
+
+- 套件裝好（flask 3.1.3、ruamel.yaml 0.19.1），`py tests/run_all.py` 7 支全過，連跑三輪穩定
+- 歷史日 K：00919 / 2603 / 2330 各 478 根，涵蓋 24 個月
+- 每日排程已安裝並手動觸發成功一次（產出 `2026-08-21.md`，模擬倉前進到 08-21）
+- 桌面上有「投資儀表板」「投資工具箱」兩個捷徑
+- `.claude/settings.local.json` 加了 Stop / Notification hook，工作完成會跳桌面通知
+  （個人設定，已在 `.gitignore` 排除）
+
+**以上全部還在工作區，沒有 commit。**
+
+---
+
 ## 接下來可以做什麼
 
 按「現在最痛」排序，不是按難度：
 
-1. **上面那三項驗證**。改動已經寫完了，但沒有人親眼看過它在真實資料上跑。
-2. **Windows 的桌面捷徑與每日排程**。核心程式跨平台，但 `.app` 和 LaunchAgent
-   不是——現在在這台機器上等於沒有自動更新，而說明頁還寫著「每天自動跑」。
-   （這正是 `fix/review-p0-p1-p2` 那批修正的主題：不要讓系統安靜地不做事。）
-3. **把三條分支收斂回 `main`**。現在的狀態很容易讓下一次改動基於錯的起點。
-4. **`both` 模式的實際體驗**。程式支援了，但沒有真的用它跑過一天，
+1. **把三條分支收斂回 `main`**。現在的狀態很容易讓下一次改動基於錯的起點。
+   這是目前最痛的一項——上面那批 Windows 修正還全部躺在工作區沒進版控。
+2. **`both` 模式的實際體驗**。程式支援了，但沒有真的用它跑過一天，
    同一檔股票在兩邊都有時的畫面只有測試看過。
+3. **引擎真的有部位時的畫面**。`paper_state.json` 目前仍是 0 檔，
+   線上看到的還是空狀態。等模擬倉真的進場一次再看一次。
+4. **`store.py` 的原子寫入沒有跨行程鎖**（`save_doc`、`_write_cache`）。
+   共用固定的 `.tmp` 檔名，跟 `history.py` 修掉的是同一類問題，
+   只是撞上的機會小得多（單一行程、寫入視窗短）。儀表板和排程同時寫
+   `quotes_cache.json` 時理論上會踩到。
 
 再往後就是 README「尚未做」列的那些（真實下單、研究筆記接真實資訊源），
 那是完全不同的風險等級，先累積幾個月模擬績效再說。

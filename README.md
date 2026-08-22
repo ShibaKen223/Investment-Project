@@ -9,7 +9,23 @@
 
 ## 第一次使用
 
+### macOS
+
 **在 Finder 裡雙擊 `launch/安裝.command`**，然後照著畫面走。
+
+### Windows
+
+**雙擊 `launch\win\安裝.bat`**，然後照著畫面走。
+
+`launch/` 最外層那幾個檔案（`.app`、`.command`、`install_daily.sh`）**是 macOS 專用的**，
+在 Windows 上點了不會有反應。Windows 的東西全部在 `launch\win\` 底下。
+
+還有一個容易踩的地方：**Windows 內建的 `python` 指令通常是 Microsoft Store 的空殼**，
+執行起來直接 exit 49，不會有看得懂的錯誤訊息。能用的是 **`py`**。
+文件裡寫 `python3 xxx.py` 的地方，在 Windows 上都請改成 `py xxx.py`。
+安裝腳本會自己找出可用的那一個，不需要你處理。
+
+---
 
 它會裝套件、跑測試確認裝好了、把兩個捷徑放到桌面，
 再問你要不要補歷史資料和開每日排程——每一步都會先問過你。
@@ -62,21 +78,30 @@ python3 webapp/app.py                 # 開儀表板
 
 ### 每天自動跑
 
-```bash
-bash launch/install_daily.sh
-```
-
 週一至週五 15:00 自動抓收盤行情、產生報告。（台股 13:30 收盤，資料源約 14:00–15:00 更新。）
 
-```bash
-bash launch/install_daily.sh --status
-```
+**macOS**（LaunchAgent）：
 
 ```bash
-bash launch/install_daily.sh --uninstall
+bash launch/install_daily.sh              # 安裝
+bash launch/install_daily.sh --status     # 查看
+bash launch/install_daily.sh --uninstall  # 移除
 ```
 
 改時間：`INVEST_HOUR=16 bash launch/install_daily.sh`
+
+**Windows**（工作排程器）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launch\win\install_daily.ps1
+powershell -ExecutionPolicy Bypass -File launch\win\install_daily.ps1 -Status
+powershell -ExecutionPolicy Bypass -File launch\win\install_daily.ps1 -Uninstall
+```
+
+改時間：加 `-Hour 16`。工作名稱是 `InvestmentDailyUpdate`，在「工作排程器」裡看得到。
+兩邊都是使用者層級的排程，不需要系統管理員權限。
+
+儀表板上的「自動更新沒在跑」橫幅會各自去問各自的排程系統，所以兩個平台都準。
 
 ### Email 提醒
 
