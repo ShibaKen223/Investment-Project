@@ -67,13 +67,16 @@ def min_ready_codes(config: dict) -> int:
         return DEFAULT_MIN_READY_CODES
 
 
-def ingest_quotes(codes: list[str], quotes: dict[str, Quote]) -> list[str]:
-    """把今天的行情寫進歷史日 K。回傳成功寫入的代號。
+def todays_bars(codes: list[str], quotes: dict[str, Quote]) -> dict[str, Bar]:
+    """把今天的行情轉成日 K，但**不寫檔**。
 
     開高低任一欄缺值就跳過——盤中無成交的標的，
     用收盤價補出來的假 K 棒會污染均線。
+
+    刻意跟寫檔分開，因為 dry-run 也需要今天這根 K:
+    它不能寫進歷史檔，但沒有它的話 run_day() 就找不到今天的開盤價（見 run_daily）。
     """
-    written: list[str] = []
+    bars: dict[str, Bar] = {}
     for code in codes:
         quote = quotes.get(code)
         if quote is None:
@@ -89,8 +92,16 @@ def ingest_quotes(codes: list[str], quotes: dict[str, Quote]) -> list[str]:
             volume=int(quote.volume or 0),
         )
         if bar.is_valid:
-            history.save_bars(code, [bar])
-            written.append(code)
+            bars[code] = bar
+    return bars
+
+
+def ingest_quotes(codes: list[str], quotes: dict[str, Quote]) -> list[str]:
+    """把今天的行情寫進歷史日 K。回傳成功寫入的代號。"""
+    written: list[str] = []
+    for code, bar in todays_bars(codes, quotes).items():
+        history.save_bars(code, [bar])
+        written.append(code)
     return written
 
 
@@ -162,6 +173,7 @@ def run_daily(
         )
         return {"skipped": message}
 
+    today_bars = todays_bars(codes, quotes)
     if not dry_run:
         ingest_quotes(codes, quotes)
 
@@ -171,6 +183,26 @@ def run_daily(
         # 還原權值後的價格：除權息與分割的假斷崖會誤觸發停損，
         # 也會讓均線在事件後 60 天內整段失真。
         bars = history.load_bars_adjusted(code)
+
+        # 今天這根 K 一定要在 series 裡，不管有沒有寫檔。
+        #
+        # dry-run 不寫歷史檔，所以在記憶體裡補上。少了這一步，series 最新的
+        # 一根是昨天，run_day() 找不到今天的開盤價 → 昨天的委託會全部被判成
+        # 「當日無開盤價」而作廢，進出場判斷也整段跳過。dry-run 於是印出一份
+        # 「今天什麼都沒做」的假報告——而「先看看它會做什麼」正是 dry-run
+        # 唯一的用途。
+        #
+        # 實跑時上面已經寫進去了，這裡的日期比對會讓它自動變成 no-op。
+        # 用 > 而不是 !=，是為了擋掉行情日期比歷史還舊的情況（連假、
+        # 資料源沒更新）——那種 bar 接到尾巴會讓序列不再是時間順序。
+        #
+        # 今天這根是未還原的原始價，接在還原序列後面是對的：
+        # 還原是把「過去」的價格調整到「現在」的基準上，今天本身不需要調整。
+        bar = today_bars.get(code)
+        if bar is not None and (not bars or bar.date > bars[-1].date):
+            bars = bars + [bar]
+
+
         if not bars:
             continue
         universe[code] = Series(code=code, bars=bars)
