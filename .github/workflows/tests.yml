@@ -5,8 +5,12 @@
 # 數字照樣印出來，只是那些決策是錯的。這種東西要靠自動化守，不能靠自律。
 name: tests
 
+# push 只看主線，分支上的驗證交給 pull_request。
+# 兩個都不限分支的話，同一個 commit 會跑兩輪一模一樣的測試——
+# 一次來自 push、一次來自 PR，浪費時間也讓 checks 清單變得難讀。
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
