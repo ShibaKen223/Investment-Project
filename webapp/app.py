@@ -537,16 +537,21 @@ def history_report(trade_date: str):
     """打開單一天的報告全文（含模擬倉那一段）。"""
     import re
 
+    import markdown as _md
+    from markupsafe import Markup
+
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", trade_date):
         return redirect(url_for("history"))
     path = REPORT_DIR / f"{trade_date}.md"
     if not path.exists():
         flash(f"找不到 {trade_date} 的報告。", "error")
         return redirect(url_for("history"))
+    raw = path.read_text(encoding="utf-8")
+    html = _md.markdown(raw, extensions=["tables", "fenced_code"])
     return render_template(
         "report_detail.html",
         trade_date=trade_date,
-        content=path.read_text(encoding="utf-8"),
+        content=Markup(html),
     )
 
 

@@ -6,8 +6,8 @@
   <div class="meta"><a href="{{ url_for('history') }}">← 回歷史</a>　·　{{ trade_date }} 的完整報告</div>
 </div>
 
-<div class="card">
-  <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.7;margin:0">{{ content }}</pre>
+<div class="card report-body">
+  {{ content }}
 </div>
 
 {% endblock %}
