@@ -2,6 +2,9 @@
 
 只綁定 127.0.0.1，資料完全留在你的電腦上，不對外開放。
 
+但綁定本機只擋得住「別台機器連進來」。擋不住「你自己的瀏覽器被別的網站
+指使」——那要靠 _guard_request()，見下面那支的說明。
+
 啟動方式（一般使用者請雙擊桌面圖示，不需要跑這行）:
     python3 webapp/app.py
 """
@@ -9,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -18,10 +22,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from flask import (  # noqa: E402
     Flask,
+    abort,
     flash,
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 
@@ -37,9 +43,74 @@ from portfolio import (  # noqa: E402
 )
 
 app = Flask(__name__)
-app.secret_key = "local-only-investment-dashboard"  # 僅供 flash 訊息，非安全用途
+
+# 只用來簽 session cookie（flash 訊息與下面的 CSRF token）。每次啟動重新生成:
+# 不需要跨重啟保存——重開儀表板本來就該重新開始——而寫死一組常數等於
+# 把簽章金鑰公開在版控裡，任何人都能自己偽造一個通得過驗證的 token。
+app.secret_key = secrets.token_hex(32)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # 跨站請求不帶 cookie（第一道）
 
 REPORT_DIR = ROOT / "data" / "reports"
+
+# 只接受從本機開的連線。IPv6 的 request.host 會是 "[::1]:5173"，
+# 所以比對前要先把 port 切掉。
+ALLOWED_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+
+
+# --------------------------------------------------------------------------
+# 跨站請求防護
+# --------------------------------------------------------------------------
+
+def csrf_token() -> str:
+    """這次 session 的表單驗證碼，樣板用 {{ csrf_token() }} 取。"""
+    token = session.get("_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf"] = token
+    return token
+
+
+@app.context_processor
+def _inject_csrf() -> dict:
+    return {"csrf_token": csrf_token}
+
+
+@app.before_request
+def _guard_request():
+    """擋掉來自其他網站的請求。
+
+    綁 127.0.0.1 只擋得住「別台機器連進來」，擋不住「你自己的瀏覽器被別的
+    網站指使」。使用者開著儀表板的時候逛到任何一個網頁，那個網頁都可以放一張
+    隱藏表單自動 POST 到 127.0.0.1:5173——關掉儀表板（/quit 直接 os._exit）、
+    塞一筆假持股進 positions.yaml、把觀察清單清空、改掉停損停利規則。
+    同源政策讓它讀不到回應，但這些全都是「寫」，它不需要讀。
+
+    兩道防線:
+      1. SameSite=Lax —— 跨站送過來的請求不帶 session cookie。
+      2. 表單驗證碼 —— cookie 沒帶到就沒有 token，比對必定失敗。
+         第 1 道靠瀏覽器，第 2 道靠我們自己，所以兩道都要有。
+
+    順便擋 DNS rebinding：Host 不是本機名稱就直接拒絕。
+    """
+    host = (request.host or "").rsplit(":", 1)[0]
+    if host not in ALLOWED_HOSTS:
+        abort(403, "這個儀表板只接受從本機（127.0.0.1）開啟。")
+
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+
+    expected = session.get("_csrf", "")
+    supplied = request.form.get("_csrf", "")
+    # expected 是空的時候也要擋。少了前半段，compare_digest("", "") 會回 True，
+    # 於是「沒有 session 的請求」反而全部通過——正好是要擋的那種。
+    if not expected or not secrets.compare_digest(supplied, expected):
+        abort(
+            400,
+            "表單驗證碼不符。請重新整理頁面再操作一次；"
+            "如果你沒有按下任何按鈕就看到這一頁，那是某個網站試圖從外部"
+            "操作你的儀表板，已經被擋下來了。",
+        )
+    return None
 
 
 # --------------------------------------------------------------------------

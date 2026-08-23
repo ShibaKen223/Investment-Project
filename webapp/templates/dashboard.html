@@ -54,6 +54,7 @@
   </div>
   <div class="spacer" style="flex:1"></div>
   <form method="post" action="{{ url_for('refresh') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <button class="ghost small">更新報價</button>
   </form>
 </div>
@@ -295,6 +296,7 @@
     <summary>新增持股</summary>
     <div>
       <form method="post" action="{{ url_for('position_add') }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <div class="grid c4">
           <div class="field">
             <label>股票代號</label>
@@ -341,6 +343,7 @@
     <summary>登記出場</summary>
     <div>
       <form method="post" action="{{ url_for('position_exit') }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <input type="hidden" name="trade_date" value="{{ trade_date }}">
         <div class="grid c4">
           <div class="field">
@@ -439,6 +442,7 @@
         <td class="name">{{ w.note }}</td>
         <td class="num">
           <form method="post" action="{{ url_for('watch_remove') }}">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <input type="hidden" name="code" value="{{ w.code }}">
             <button class="ghost small">移除</button>
           </form>
@@ -456,6 +460,7 @@
     <summary>加入觀察</summary>
     <div>
       <form method="post" action="{{ url_for('watch_add') }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <div class="grid c3">
           <div class="field"><label>代號</label>
             <input name="code" required placeholder="00919"></div>
@@ -518,6 +523,7 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('journal_add') }}" style="margin-top:14px">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <input type="hidden" name="trade_date" value="{{ trade_date }}">
     <div class="field">
       <textarea name="text" rows="2"
