@@ -1,0 +1,38 @@
+# 每次 push 與 PR 都跑一次測試。
+#
+# tests/run_all.py 本身寫得很完整，但它只有在有人記得跑的時候才會跑。
+# 這個專案的每一個 bug 都是沉默的——策略被改壞不會噴錯，回測照樣跑完、
+# 數字照樣印出來，只是那些決策是錯的。這種東西要靠自動化守，不能靠自律。
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 是開發用的版本，3.12 是為了先看到相容性問題。
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 測試全部用合成資料，不連外網也不碰真的行情 API。
+      # 會連網的只有 datasource.py / history.py 的抓取函式，測試不呼叫它們。
+      - name: 跑測試
+        run: python3 tests/run_all.py --verbose
