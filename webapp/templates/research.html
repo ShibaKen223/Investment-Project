@@ -25,120 +25,129 @@
   {% endif %}
 </div>
 
-{% for item in items %}
-  {% set f = item.facts %}
-  <div class="card">
-    <h2>
-      {{ item.code }}{% if item.name %} {{ item.name }}{% endif %}
-      {% if item.entry %}<span class="hint">{{ item.entry.sector }}</span>{% endif %}
-    </h2>
+{% for group in groups %}
+<details class="sector-group">
+  <summary>
+    {{ group.name }}
+    <span class="hint">{{ group.items|length }} 檔</span>
+  </summary>
 
-    {% if not f %}
-      <p class="empty-note">沒有歷史日 K，無法計算。</p>
-    {% else %}
-      <div class="meta" style="margin-bottom:10px">
-        收盤 <b>{{ '%.2f'|format(f.close) }}</b>（{{ f.as_of }}）　·　歷史資料 {{ f.bars }} 根 K
-      </div>
+  {% for item in group.items %}
+    {% set f = item.facts %}
+    <div class="card">
+      <h2>
+        {{ item.code }}{% if item.name %} {{ item.name }}{% endif %}
+        {% if item.entry %}<span class="hint">{{ item.entry.sector }}</span>{% endif %}
+      </h2>
 
-      {% if item.gap_months %}
-        <div class="warn-box">
-          <b>這檔的歷史中間缺了 {{ item.gap_months }} 個月。</b>
-          缺掉的期間算不出報酬，下表會顯示「—」而不是給你一個標錯期間的數字。
-          請 Claude 幫你把缺掉的月份補起來就會恢復正常。
+      {% if not f %}
+        <p class="empty-note">沒有歷史日 K，無法計算。</p>
+      {% else %}
+        <div class="meta" style="margin-bottom:10px">
+          收盤 <b>{{ '%.2f'|format(f.close) }}</b>（{{ f.as_of }}）　·　歷史資料 {{ f.bars }} 根 K
         </div>
-      {% endif %}
 
-      {# ---------- 價格在說什麼 ---------- #}
-      <h3>價格在說什麼</h3>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>{% for period in f.returns %}<th>{{ period }}</th>{% endfor %}</tr>
-          </thead>
-          <tbody>
-            <tr>
-              {% for period, value in f.returns.items() %}
-                <td class="{{ 'pos' if value and value > 0 else 'neg' if value and value < 0 }}">
-                  {% if value is none %}—{% else %}{{ '%+.1f'|format(value) }}%{% endif %}
-                </td>
-              {% endfor %}
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <ul class="research-shape">
-        {% for line in item.shape %}<li>{{ line }}</li>{% endfor %}
-      </ul>
-      <p class="footnote">
-        以上每個數字都是從日 K 直接算出來的，你可以自己驗證。
-        但它們只描述<b>價格的形狀</b>，不解釋原因。
-      </p>
-
-      {# ---------- 背景知識 ---------- #}
-      {% if item.entry %}
-        <h3>這家公司在做什麼</h3>
-        <dl class="research-facts">
-          {% if item.entry.what %}
-            <dt>在賣什麼</dt><dd>{{ item.entry.what }}</dd>
-          {% endif %}
-          {% if item.entry.position %}
-            <dt>供應鏈位置</dt><dd>{{ item.entry.position }}</dd>
-          {% endif %}
-          {% if item.entry.revenue_driver %}
-            <dt>營收跟著什麼跑</dt><dd>{{ item.entry.revenue_driver }}</dd>
-          {% endif %}
-          {% if item.entry.watch %}
-            <dt>該追蹤的指標</dt>
-            <dd><ul>{% for w in item.entry.watch %}<li>{{ w }}</li>{% endfor %}</ul></dd>
-          {% endif %}
-          {% if item.note and item.note.cycle %}
-            <dt>產業循環特性</dt><dd>{{ item.note.cycle }}</dd>
-          {% endif %}
-        </dl>
-        {% if item.note and item.note.trap %}
+        {% if item.gap_months %}
           <div class="warn-box">
-            <b>這個產業最常見的誤判</b>：{{ item.note.trap }}
+            <b>這檔的歷史中間缺了 {{ item.gap_months }} 個月。</b>
+            缺掉的期間算不出報酬，下表會顯示「—」而不是給你一個標錯期間的數字。
+            請 Claude 幫你把缺掉的月份補起來就會恢復正常。
           </div>
         {% endif %}
+
+        {# ---------- 價格在說什麼 ---------- #}
+        <h3>價格在說什麼</h3>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>{% for period in f.returns %}<th>{{ period }}</th>{% endfor %}</tr>
+            </thead>
+            <tbody>
+              <tr>
+                {% for period, value in f.returns.items() %}
+                  <td class="{{ 'pos' if value and value > 0 else 'neg' if value and value < 0 }}">
+                    {% if value is none %}—{% else %}{{ '%+.1f'|format(value) }}%{% endif %}
+                  </td>
+                {% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <ul class="research-shape">
+          {% for line in item.shape %}<li>{{ line }}</li>{% endfor %}
+        </ul>
         <p class="footnote">
-          這一段是人工整理的靜態知識，<b>會過時</b>。
-          它寫的是變化很慢的商業模式，不是財測或目標價。
-          內容不對或想補充，請 Claude 幫你改。
+          以上每個數字都是從日 K 直接算出來的，你可以自己驗證。
+          但它們只描述<b>價格的形狀</b>，不解釋原因。
         </p>
-      {% else %}
-        <h3>這家公司在做什麼</h3>
-        <p class="empty-note">
-          系統的產業資料庫裡還沒有 {{ item.code }}。
-          請 Claude 幫你補一筆，之後這裡就會有內容。
-        </p>
-      {% endif %}
 
-      {# ---------- 要自己去查 ---------- #}
-      <h3>要你自己去查</h3>
-      <ul class="research-questions">
-        {% for q in item.questions %}<li>{{ q }}</li>{% endfor %}
-      </ul>
-
-      {# ---------- 名詞 ---------- #}
-      {% if item.terms %}
-        <details class="research-terms">
-          <summary>📖 這檔會用到的名詞（{{ item.terms|length }} 個）</summary>
-          {% for t in item.terms %}
-            <div class="term">
-              <b>{{ t.term }}</b>
-              {% if t.alias %}<span class="hint">又叫：{{ t.alias|join('、') }}</span>{% endif %}
-              <div class="term-one-liner">{{ t.one_liner }}</div>
-              {% if t.detail %}<div class="term-detail">{{ t.detail }}</div>{% endif %}
-              {% if t.why_it_matters %}
-                <div class="term-why"><b>為什麼重要</b>：{{ t.why_it_matters }}</div>
-              {% endif %}
+        {# ---------- 背景知識 ---------- #}
+        {% if item.entry %}
+          <h3>這家公司在做什麼</h3>
+          <dl class="research-facts">
+            {% if item.entry.what %}
+              <dt>在賣什麼</dt><dd>{{ item.entry.what }}</dd>
+            {% endif %}
+            {% if item.entry.position %}
+              <dt>供應鏈位置</dt><dd>{{ item.entry.position }}</dd>
+            {% endif %}
+            {% if item.entry.revenue_driver %}
+              <dt>營收跟著什麼跑</dt><dd>{{ item.entry.revenue_driver }}</dd>
+            {% endif %}
+            {% if item.entry.watch %}
+              <dt>該追蹤的指標</dt>
+              <dd><ul>{% for w in item.entry.watch %}<li>{{ w }}</li>{% endfor %}</ul></dd>
+            {% endif %}
+            {% if item.note and item.note.cycle %}
+              <dt>產業循環特性</dt><dd>{{ item.note.cycle }}</dd>
+            {% endif %}
+          </dl>
+          {% if item.note and item.note.trap %}
+            <div class="warn-box">
+              <b>這個產業最常見的誤判</b>：{{ item.note.trap }}
             </div>
-          {% endfor %}
-        </details>
+          {% endif %}
+          <p class="footnote">
+            這一段是人工整理的靜態知識，<b>會過時</b>。
+            它寫的是變化很慢的商業模式，不是財測或目標價。
+            內容不對或想補充，請 Claude 幫你改。
+          </p>
+        {% else %}
+          <h3>這家公司在做什麼</h3>
+          <p class="empty-note">
+            系統的產業資料庫裡還沒有 {{ item.code }}。
+            請 Claude 幫你補一筆，之後這裡就會有內容。
+          </p>
+        {% endif %}
+
+        {# ---------- 要自己去查 ---------- #}
+        <h3>要你自己去查</h3>
+        <ul class="research-questions">
+          {% for q in item.questions %}<li>{{ q }}</li>{% endfor %}
+        </ul>
+
+        {# ---------- 名詞 ---------- #}
+        {% if item.terms %}
+          <details class="research-terms">
+            <summary>這檔會用到的名詞（{{ item.terms|length }} 個）</summary>
+            {% for t in item.terms %}
+              <div class="term">
+                <b>{{ t.term }}</b>
+                {% if t.alias %}<span class="hint">又叫：{{ t.alias|join('、') }}</span>{% endif %}
+                <div class="term-one-liner">{{ t.one_liner }}</div>
+                {% if t.detail %}<div class="term-detail">{{ t.detail }}</div>{% endif %}
+                {% if t.why_it_matters %}
+                  <div class="term-why"><b>為什麼重要</b>：{{ t.why_it_matters }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </details>
+        {% endif %}
       {% endif %}
-    {% endif %}
-  </div>
+    </div>
+  {% endfor %}
+</details>
 {% endfor %}
 
 <div class="card">
