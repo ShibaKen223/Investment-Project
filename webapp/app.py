@@ -624,6 +624,8 @@ def paper_page():
         if candidate.exists():
             latest_report = equity_curve[-1]["trade_date"]
 
+    quote_names = {code: q.name for code, q in quotes.items()}
+
     return render_template(
         "paper.html",
         enabled=True,
@@ -632,6 +634,7 @@ def paper_page():
         params=params,
         holdings=holdings,
         pending=account.pending,
+        quote_names=quote_names,
         trades=trades[::-1][:30],   # 最新的排最上面
         equity_curve=equity_curve[-60:],
         sparkline=_sparkline_svg(equity_curve[-60:]),
