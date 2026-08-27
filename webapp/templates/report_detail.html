@@ -7,7 +7,16 @@
 </div>
 
 <div class="card">
-  <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.7;margin:0">{{ content }}</pre>
+  {% if content_html %}
+    {# 報告是本機產生的檔案，裡面的 <details> 是刻意留的，所以不轉義。 #}
+    <div class="markdown-body">{{ content_html|safe }}</div>
+  {% else %}
+    {# 沒裝 markdown 套件時的退路：至少讓報告還讀得到。 #}
+    <p class="meta" style="margin:0 0 12px">
+      （未安裝 markdown 套件，以純文字顯示。執行 <code>pip3 install -r requirements.txt</code> 可還原排版。）
+    </p>
+    <pre class="markdown-raw">{{ content }}</pre>
+  {% endif %}
 </div>
 
 {% endblock %}

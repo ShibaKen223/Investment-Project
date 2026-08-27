@@ -564,14 +564,14 @@ def build_report(codes: list[str], as_of: str | None = None) -> str:
     glossary = load_glossary()
     stocks, sector_notes = load_sectors()
 
-    bars_by_code = {c: history.load_bars(c) for c in codes}
+    bars_by_code = {c: history.load_bars_adjusted(c) for c in codes}
 
     benchmark: list[Bar] | None = None
     for candidate in BENCHMARKS:
         if bars_by_code.get(candidate):
             benchmark = bars_by_code[candidate]
             break
-        extra = history.load_bars(candidate)
+        extra = history.load_bars_adjusted(candidate)
         if extra:
             benchmark = extra
             break
@@ -750,7 +750,7 @@ def main() -> int:
         print("或在 config/positions.yaml 填入持股與觀察清單。")
         return 1
 
-    missing = [c for c in codes if not history.load_bars(c)]
+    missing = [c for c in codes if not history.load_bars_adjusted(c)]
     if len(missing) == len(codes):
         print("這些標的都沒有歷史日 K，無法計算。先跑：")
         print("    python3 src/history.py --months 24")
@@ -787,11 +787,11 @@ def build_view(codes: list[str]) -> dict:
     glossary = load_glossary()
     stocks, sector_notes = load_sectors()
 
-    bars_by_code = {c: history.load_bars(c) for c in codes}
+    bars_by_code = {c: history.load_bars_adjusted(c) for c in codes}
 
     benchmark: list[Bar] | None = None
     for candidate in BENCHMARKS:
-        bars = bars_by_code.get(candidate) or history.load_bars(candidate)
+        bars = bars_by_code.get(candidate) or history.load_bars_adjusted(candidate)
         if bars:
             benchmark = bars
             break

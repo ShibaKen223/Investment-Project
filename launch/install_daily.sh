@@ -6,9 +6,13 @@
 #   移除:  bash launch/install_daily.sh --uninstall
 #   查看:  bash launch/install_daily.sh --status
 #
-# 排程內容：週一到週五 15:00 自動抓收盤行情、產生當日報告，
+# 排程內容：週一到週五 15:00 執行 launch/daily_run.sh，
+# 它會依序做「補歷史 → 修補破洞 → 產生報告與模擬倉」，
 # 若有部位觸發停損／停利且已設定 config/mail.yaml，就寄一封提醒信。
 # 台股 13:30 收盤，資料源約 14:00–15:00 更新，所以排在 15:00。
+#
+# 順序不是隨便排的：模擬倉必須在歷史補齊之後才掃描，
+# 否則會得到一個假的「今天沒有訊號」。詳見 launch/daily_run.sh 的說明。
 #
 # 這只是「使用者層級」的排程，不需要管理員權限，也不會動到系統設定。
 # ------------------------------------------------------------
@@ -55,9 +59,8 @@ cat > "$PLIST" <<PLIST_EOF
 
   <key>ProgramArguments</key>
   <array>
-    <string>${PY}</string>
-    <string>${ROOT}/src/main.py</string>
-    <string>--quiet</string>
+    <string>/bin/bash</string>
+    <string>${ROOT}/launch/daily_run.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
@@ -90,7 +93,8 @@ launchctl load "$PLIST"
 echo "✅ 已安裝每日排程"
 echo ""
 echo "   時間      週一至週五 ${HOUR}:$(printf '%02d' "$MINUTE")"
-echo "   動作      抓收盤行情 → 產生當日報告 → 有觸發訊號才寄信"
+echo "   動作      補歷史 → 修補破洞 → 抓收盤行情產生報告與模擬倉 → 有觸發訊號才寄信"
+echo "   流程      $ROOT/launch/daily_run.sh（可單獨手動執行）"
 echo "   設定檔    $PLIST"
 echo "   執行紀錄  $ROOT/data/daily.log"
 echo ""

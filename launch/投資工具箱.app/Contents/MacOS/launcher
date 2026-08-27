@@ -48,14 +48,9 @@ open_dashboard() {
     open "$URL"
     return
   fi
-  mkdir -p data
-  echo "--- $(date '+%Y-%m-%d %H:%M:%S') 啟動 ---" >> "$ROOT/data/app.log"
-  nohup "$PY" webapp/app.py >> "$ROOT/data/app.log" 2>&1 &
-  for _ in $(seq 1 60); do
-    curl -s -o /dev/null --max-time 2 "$URL" && return
-    sleep 0.25
-  done
-  alert "儀表板啟動失敗。請查看 data/app.log。常見原因是套件沒裝，可執行『安裝與設定』。"
+  # 借終端機的身分執行，原因見 launch/run_dashboard.sh 開頭
+  # （這個 .app 沒有簽章，直接寫 data/ 底下的檔案會被 macOS 靜靜擋掉）。
+  run_in_terminal "投資儀表板" "bash launch/run_dashboard.sh"
 }
 
 CHOICE=$(osascript <<'APPLESCRIPT'

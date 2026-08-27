@@ -128,6 +128,71 @@ stocks:
     watch: [DRAM 報價走勢, 供應商的擴產與減產, 庫存週期]
     terms: [dram, idm, gross_margin]
 
+  "2344":
+    name: 華邦電
+    sector: 半導體 - 記憶體
+    what: 生產利基型 DRAM 與 NOR Flash 記憶體，並有自己的晶圓廠。
+    position: IDM，自己設計也自己製造。
+    revenue_driver: >-
+      記憶體報價與消費性、車用、工控等利基市場的需求。
+      利基型記憶體的價格波動通常小於標準型 DRAM，但方向仍跟著大循環走。
+    watch: [記憶體報價, 產能利用率, 客戶端庫存, 新廠折舊壓力]
+    terms: [dram, nand, idm, utilization, gross_margin]
+
+  "2303":
+    name: 聯電
+    sector: 半導體 - 晶圓代工
+    what: 晶圓代工廠，以成熟製程與特殊製程為主，不追最先進的節點。
+    position: 與 2330 同一段供應鏈，但產品組合完全不同。
+    revenue_driver: >-
+      成熟製程的產能利用率與報價。成熟製程競爭者多、進入障礙低於先進製程，
+      所以它對「產能過剩」比先進製程敏感得多——這也是它和台積電
+      不會同步的原因，放在同一份清單裡才有分散的意義。
+    watch: [產能利用率, 成熟製程報價, 同業擴產進度, 毛利率]
+    terms: [foundry, process_node, wafer, utilization, gross_margin]
+
+  "3034":
+    name: 聯詠
+    sector: 半導體 - IC 設計
+    what: 設計顯示驅動 IC 與系統單晶片，用在面板、電視、手機螢幕等。
+    position: IC 設計，製造外包，下游是面板廠與品牌廠。
+    revenue_driver: 面板與消費電子的出貨量，以及高階顯示規格的滲透率。
+    watch: [面板廠稼動率, 消費電子需求, 庫存水位, 毛利率]
+    terms: [fabless, gross_margin, earnings_call]
+
+  "2379":
+    name: 瑞昱
+    sector: 半導體 - IC 設計
+    what: 設計網通、乙太網路、音效與各類週邊介面晶片。
+    position: IC 設計，客戶涵蓋 PC、網通設備與消費電子。
+    revenue_driver: PC 與網通設備出貨量，以及高速傳輸規格的世代更替。
+    watch: [PC 與網通需求, 新規格導入進度, 庫存水位, 毛利率]
+    terms: [fabless, gross_margin]
+
+  "3443":
+    name: 創意
+    sector: 半導體 - IC 設計服務
+    what: 提供 ASIC 設計服務與矽智財，幫客戶把規格做成可量產的客製晶片。
+    position: >-
+      介於 IC 設計與晶圓代工之間。客戶自己不見得有完整設計能力，
+      由它承接設計、投片、封測，再交回成品晶片。
+    revenue_driver: >-
+      客戶自研晶片的專案數與量產時程。營收分成 NRE（設計服務費）
+      與量產出貨兩塊，兩者的毛利結構差很多——只看總營收會誤判。
+    watch: [新專案取得, 量產與 NRE 佔比, 先進製程投片進度, 毛利率]
+    terms: [fabless, foundry, process_node, gross_margin]
+
+  "3661":
+    name: 世芯-KY
+    sector: 半導體 - IC 設計服務
+    what: ASIC 設計服務，專注高效能運算的客製晶片。
+    position: 同創意，屬設計服務端。
+    revenue_driver: >-
+      少數大型客戶的客製晶片專案。客戶集中度極高是它的結構特徵——
+      單一專案的遞延或取消會直接反映在營收上，波動比一般 IC 設計大。
+    watch: [客戶集中度, 專案量產時程, 先進製程佔比, 毛利率]
+    terms: [fabless, foundry, process_node, gross_margin]
+
   # ==========================================================
   # PCB / 載板
   # ==========================================================
@@ -176,6 +241,17 @@ stocks:
       AI 與高速傳輸帶動的是「高階 CCL」，不是所有等級都同樣受惠。
     watch: [高階材料佔比, 銅價等原料成本, 下游 PCB 廠的稼動率]
     terms: [ccl, pcb, gross_margin]
+
+  "2313":
+    name: 華通
+    sector: PCB - 手機板/HDI
+    what: 生產印刷電路板，以手機用的 HDI 板為主，並跨入伺服器與衛星通訊用板。
+    position: PCB 製造，客戶是手機品牌與各類設備組裝廠。
+    revenue_driver: >-
+      手機出貨量與規格（層數、材料），加上新切入的伺服器與衛星應用比重。
+      手機是成熟市場，成長要看的是「非手機營收佔比」爬得多快。
+    watch: [手機出貨與規格, 非手機營收佔比, 稼動率, 毛利率]
+    terms: [pcb, hdi, ai_server, utilization, gross_margin]
 
   # ==========================================================
   # AI 伺服器與電子代工
@@ -231,6 +307,68 @@ stocks:
       電動車與工業自動化的需求。
     watch: [各業務別佔比, AI 相關產品進度, 毛利率, 電動車業務發展]
     terms: [ai_server, liquid_cooling, gross_margin, operating_margin]
+
+  "2345":
+    name: 智邦
+    sector: 網通 - 資料中心交換器
+    what: 設計製造網路交換器，主力是資料中心用的高速交換器。
+    position: >-
+      網通設備 ODM。伺服器要串成叢集才能運作，交換器就是把它們連起來的東西，
+      所以它的需求跟著資料中心建置量走，而不是跟著伺服器單價走。
+    revenue_driver: 資料中心的建置量與網路速率世代（越高速的交換器單價越高）。
+    watch: [高速交換器出貨與速率組合, 雲端業者資本支出, 毛利率]
+    terms: [ai_server, odm, optical_module, gross_margin]
+
+  "2376":
+    name: 技嘉
+    sector: 電子零組件 - 板卡/伺服器
+    what: 生產主機板與顯示卡，並跨足 AI 伺服器整機。
+    position: 板卡製造與品牌兼具，近年伺服器業務比重上升。
+    revenue_driver: >-
+      PC 與顯示卡的消費需求，加上 AI 伺服器出貨。
+      這兩塊的毛利結構不同，營收成長不一定帶動獲利同幅成長。
+    watch: [伺服器營收佔比, 顯示卡需求與庫存, 毛利率]
+    terms: [ai_server, gross_margin, operating_margin]
+
+  "2357":
+    name: 華碩
+    sector: 品牌 - PC/伺服器
+    what: 自有品牌的筆電、桌機與周邊，並經營伺服器與零組件業務。
+    position: 品牌端，直接面對消費者與企業客戶。
+    revenue_driver: PC 換機週期與消費需求，加上 AI 伺服器等新業務的進展。
+    watch: [PC 出貨與庫存, 品牌與代工業務佔比, 毛利率, 匯率]
+    terms: [ai_server, gross_margin, operating_margin]
+
+  "3324":
+    name: 雙鴻
+    sector: 電子零組件 - 散熱
+    what: 生產散熱模組，產品涵蓋傳統風冷與資料中心用的液冷方案。
+    position: 零組件供應商，客戶是伺服器與電子產品的組裝廠。
+    revenue_driver: >-
+      伺服器與晶片的功耗。晶片越耗電、散熱需求越高，
+      液冷的單價又遠高於風冷，所以「液冷佔比」比出貨量更能說明獲利。
+    watch: [液冷佔比與導入進度, 客戶端機櫃設計, 產能擴充, 毛利率]
+    terms: [liquid_cooling, ai_server, gross_margin]
+
+  "3017":
+    name: 奇鋐
+    sector: 電子零組件 - 散熱
+    what: 生產散熱風扇、均熱片與散熱模組，並發展液冷產品。
+    position: 同雙鴻，屬散熱零組件供應商。
+    revenue_driver: 伺服器與電子產品的散熱需求，以及高階散熱方案的滲透率。
+    watch: [高階散熱與液冷佔比, 產能布局, 客戶結構, 毛利率]
+    terms: [liquid_cooling, ai_server, gross_margin]
+
+  "3008":
+    name: 大立光
+    sector: 光學 - 鏡頭
+    what: 生產手機等裝置用的光學鏡頭。
+    position: 光學元件供應商，上游是玻璃與塑膠原料，下游是相機模組與手機品牌。
+    revenue_driver: >-
+      手機出貨量與鏡頭規格升級（顆數、畫素、光圈）。
+      它的股價週期跟半導體與 AI 幾乎無關，這是把它放進清單的理由。
+    watch: [手機出貨與規格升級, 高階鏡頭佔比, 產能利用率, 毛利率]
+    terms: [utilization, gross_margin, earnings_call]
 
   # ==========================================================
   # 傳統產業與金融
@@ -318,6 +456,61 @@ stocks:
     revenue_driver: 店數、單店營收、以及鮮食與服務類的高毛利商品佔比。
     watch: [同店營收成長, 店數變化, 毛利率, 轉投資獲利]
     terms: [gross_margin, dividend_yield]
+
+  "2618":
+    name: 長榮航
+    sector: 航空
+    what: 經營國際客運與航空貨運。
+    position: 運輸業，同時服務旅客與高單價、急件的空運貨物。
+    revenue_driver: >-
+      客運的載客率與票價、貨運的運價，成本端則看油價與匯率。
+      它跟貨櫃航運（2603/2609）常被歸為同一類，但驅動因子其實不同：
+      空運看的是急單與電子產品旺季，海運看的是大宗貿易量。
+    watch: [載客率與票價, 空運運價, 油價, 匯率, 航線與機隊調整]
+    terms: [pe_ratio, pb_ratio]
+
+  "1301":
+    name: 台塑
+    sector: 塑化
+    what: 生產泛用塑膠原料與各類石化中間產品。
+    position: 上游原料，下游是塑膠加工、紡織、包裝等各種製造業。
+    revenue_driver: >-
+      產品與原料（乙烯、原油）之間的價差，不是產品價格本身。
+      油價漲不代表它賺錢——價差擴大才是。
+    watch: [產品與原料價差, 油價, 中國供需與新增產能, 開工率]
+    terms: [gross_margin, dividend_yield, pb_ratio]
+
+  "1605":
+    name: 華新
+    sector: 電線電纜 / 不鏽鋼
+    what: 生產電線電纜與不鏽鋼產品，並有轉投資的電子相關事業。
+    position: 上游材料，下游是電網建設、營建與各類製造業。
+    revenue_driver: >-
+      銅價與鎳價，加上電網與基礎建設的投資需求。
+      原料價格上漲時庫存會產生帳面利益，這種獲利不具延續性，要分開看。
+    watch: [銅價與鎳價, 電網與基建標案, 存貨評價影響, 轉投資損益]
+    terms: [gross_margin, pb_ratio, dividend_yield]
+
+  "2881":
+    name: 富邦金
+    sector: 金融 - 金控
+    what: 旗下有壽險、銀行、證券等子公司的金融控股公司。
+    position: 金融服務業，壽險佔獲利比重高。
+    revenue_driver: >-
+      壽險的投資收益（股債市表現）、利差與銀行手續費收入。
+      壽險比重高代表淨值和獲利對股債市波動特別敏感——
+      好的時候特別好，壞的時候淨值掉得也快。
+    watch: [股債市表現, 利率與匯率避險成本, 淨值變化, 配息政策]
+    terms: [roe, pb_ratio, dividend_yield]
+
+  "4904":
+    name: 遠傳
+    sector: 電信
+    what: 提供行動通訊、寬頻與企業資訊服務。
+    position: 電信服務業，商業模式與 2412 幾乎相同。
+    revenue_driver: 用戶數與 ARPU，成長主要來自資費升級與企業／雲端服務。
+    watch: [ARPU 走勢, 用戶數變化, 企業服務營收佔比, 配息政策]
+    terms: [arpu, dividend_yield, roe]
 
 # ------------------------------------------------------------
 # 產業層級的共通提醒
