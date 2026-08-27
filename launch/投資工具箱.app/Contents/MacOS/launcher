@@ -12,6 +12,19 @@ set -u
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && cd ../../../.. && pwd -P)"
 cd "$ROOT" || exit 1
 
+# 確認算出來的路徑真的是專案，而不是隨便一個資料夾。
+# 沒有這道檢查的話，.app 一旦被「複製」到桌面（而不是做符號連結），
+# 路徑會解析到家目錄，然後它會在那裡建一個 data/ 資料夾、
+# 把錯誤寫進 ~/data/app.log，而你在專案裡怎麼找都找不到。
+if [ ! -f "$ROOT/webapp/app.py" ]; then
+  osascript -e 'display alert "找不到專案資料夾" message "這個捷徑必須留在專案資料夾裡，或用「符號連結」的方式放到桌面——直接複製一份到桌面是不行的，它會找不到程式。
+
+正確做法：在專案資料夾裡雙擊 launch/安裝.command，它會自動建立正確的捷徑。
+
+（目前解析到的位置：'"$ROOT"'）" as critical' >/dev/null 2>&1
+  exit 1
+fi
+
 PY="$(command -v python3 || echo /usr/bin/python3)"
 URL="http://127.0.0.1:5173/"
 

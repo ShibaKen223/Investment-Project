@@ -1,5 +1,6 @@
 """驗證停損停利判斷的每一條分支都真的會觸發。"""
 import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))

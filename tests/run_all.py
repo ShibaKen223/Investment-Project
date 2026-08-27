@@ -12,11 +12,18 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
+
+# 測試的輸出全是中文。Windows 的主控台預設是 GBK/cp950，子行程一印中文
+# 就 UnicodeEncodeError，於是每一支都「失敗」——失敗的是編碼，不是被測的東西。
+# 那種紅字最浪費時間：它看起來像測試壞了，實際上程式好好的。
+CHILD_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 def main() -> int:
@@ -32,6 +39,9 @@ def main() -> int:
             [sys.executable, str(path)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=CHILD_ENV,
         )
         output = (proc.stdout or "") + (proc.stderr or "")
         ok = proc.returncode == 0
