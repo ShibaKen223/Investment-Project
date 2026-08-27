@@ -29,10 +29,10 @@
 <details class="sector-group">
   <summary>
     {{ group.name }}
-    <span class="hint">{{ group.items|length }} 檔</span>
+    <span class="hint">{{ group.stocks|length }} 檔</span>
   </summary>
 
-  {% for item in group.items %}
+  {% for item in group.stocks %}
     {% set f = item.facts %}
     <div class="card">
       <h2>

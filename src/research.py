@@ -889,9 +889,9 @@ def build_view(codes: list[str]) -> dict:
     groups: list[dict] = []
     for gname in _GROUP_ORDER:
         if gname in grouped:
-            groups.append({"name": gname, "items": grouped.pop(gname)})
+            groups.append({"name": gname, "stocks": grouped.pop(gname)})
     for gname, gitems in grouped.items():
-        groups.append({"name": gname, "items": gitems})
+        groups.append({"name": gname, "stocks": gitems})
 
     return {
         "items": items,
