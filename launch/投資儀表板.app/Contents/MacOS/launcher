@@ -1,6 +1,9 @@
 #!/bin/bash
 # 投資儀表板啟動器。雙擊 .app 時執行。
 # 行為：伺服器沒在跑就啟動它；已經在跑就直接開瀏覽器分頁。
+#
+# 沒在跑的時候，實際啟動動作借終端機的身分執行（見下方），
+# 原因寫在 launch/run_dashboard.sh 開頭。
 
 set -u
 URL="http://127.0.0.1:5173/"
@@ -24,9 +27,6 @@ if [ ! -f "$ROOT/webapp/app.py" ]; then
   exit 1
 fi
 
-mkdir -p data
-LOG="$ROOT/data/app.log"
-
 alive() { curl -s -o /dev/null --max-time 2 "$URL"; }
 
 if alive; then
@@ -34,70 +34,17 @@ if alive; then
   exit 0
 fi
 
-PY="$(command -v python3 || echo /usr/bin/python3)"
-
-# 每次啟動在紀錄檔裡放一個分隔線，失敗時才知道要看哪一段
-MARKER="--- $(date '+%Y-%m-%d %H:%M:%S') 啟動 ---"
-echo "$MARKER" >> "$LOG"
-nohup "$PY" webapp/app.py >> "$LOG" 2>&1 &
-
-# 等伺服器就緒（app.py 就緒後會自己開瀏覽器）
-for _ in $(seq 1 60); do
-  alive && exit 0
-  sleep 0.25
-done
-
-# ------------------------------------------------------------
-# 起不來。重點是「直接告訴使用者發生什麼事」，
-# 而不是丟一句「請查看 data/app.log」——需要看說明的人不會去翻檔案。
-# ------------------------------------------------------------
-
-# 只取這次啟動之後的輸出
-RECENT="$(awk -v m="$MARKER" 'index($0,m){found=1; next} found' "$LOG" 2>/dev/null)"
-
-# 依照常見原因給出可以直接照做的指示
-if echo "$RECENT" | grep -q "Address already in use"; then
-  HEADLINE="儀表板已經在執行了"
-  DETAIL="但它沒有回應，可能是之前那個視窗當掉了。
-
-在終端機執行這行結束舊的，然後再雙擊一次：
-
-pkill -f 'webapp/app.py'"
-
-elif echo "$RECENT" | grep -q "ModuleNotFoundError\|No module named"; then
-  MISSING="$(echo "$RECENT" | grep -o "No module named '[^']*'" | tail -1 | sed "s/No module named '//;s/'//")"
-  HEADLINE="缺少套件${MISSING:+：$MISSING}"
-  DETAIL="在終端機執行這行安裝，然後再雙擊一次：
-
-cd '$ROOT' && pip3 install -r requirements.txt"
-
-elif echo "$RECENT" | grep -q "SyntaxError\|IndentationError"; then
-  HEADLINE="程式碼有語法錯誤"
-  DETAIL="通常是更新到一半中斷了。在終端機執行：
-
-cd '$ROOT' && git status
-
-$(echo "$RECENT" | grep -A1 'SyntaxError\|IndentationError' | head -4)"
-
-else
-  HEADLINE="儀表板啟動失敗"
-  # 直接把最後幾行有意義的輸出放進對話框
-  TAIL="$(echo "$RECENT" | grep -v '^\s*$' | tail -6)"
-  DETAIL="錯誤訊息：
-
-${TAIL:-（紀錄檔裡沒有內容，可能是 python3 本身有問題）}"
+RUN_SCRIPT="$ROOT/launch/run_dashboard.sh"
+if [ ! -f "$RUN_SCRIPT" ]; then
+  osascript -e 'display alert "找不到啟動腳本" message "launch/run_dashboard.sh 不見了，專案可能沒更新完整。" as critical' >/dev/null 2>&1
+  exit 1
 fi
 
-# AppleScript 的字串要跳脫雙引號與反斜線
-esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-
-ANSWER="$(osascript <<APPLESCRIPT 2>/dev/null
-display alert "$(esc "$HEADLINE")" message "$(esc "$DETAIL")" as critical ¬
-  buttons {"打開紀錄檔", "好"} default button "好"
+# 借終端機的身分執行，見檔案開頭的說明。
+ESCAPED_ROOT="$(printf '%s' "$ROOT" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+osascript <<APPLESCRIPT
+tell application "Terminal"
+  activate
+  do script "cd \"$ESCAPED_ROOT\" && bash launch/run_dashboard.sh"
+end tell
 APPLESCRIPT
-)"
-
-if echo "$ANSWER" | grep -q "打開紀錄檔"; then
-  open -a TextEdit "$LOG" 2>/dev/null || open "$LOG"
-fi
-exit 1

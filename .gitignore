@@ -25,3 +25,6 @@ data/app.log
 data/daily.log
 data/quotes_cache.json
 data/backups/
+
+# ad-hoc 簽章產物，因機器而異，不必進版控
+launch/*.app/Contents/_CodeSignature/
