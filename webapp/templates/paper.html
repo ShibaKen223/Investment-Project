@@ -124,11 +124,12 @@
   {% if pending %}
   <div class="table-scroll">
   <table>
-    <thead><tr><th>代號</th><th>方向</th><th class="num">股數</th><th>理由</th><th>決定於</th></tr></thead>
+    <thead><tr><th>代號</th><th>名稱</th><th>方向</th><th class="num">股數</th><th>理由</th><th>決定於</th></tr></thead>
     <tbody>
     {% for o in pending %}
       <tr>
         <td class="code">{{ o.code }}</td>
+        <td class="name">{{ quote_names.get(o.code, '—') }}</td>
         <td><span class="pill {{ 'sig-profit' if o.side == 'BUY' else 'sig-stop' }}">{{ '買進' if o.side == 'BUY' else '賣出' }}</span></td>
         <td class="num">{{ o.shares }}</td>
         <td class="name">{{ o.detail or o.reason }}</td>

@@ -572,14 +572,14 @@ def build_report(codes: list[str], as_of: str | None = None) -> str:
     glossary = load_glossary()
     stocks, sector_notes = load_sectors()
 
-    bars_by_code = {c: history.load_bars(c) for c in codes}
+    bars_by_code = {c: history.load_bars_adjusted(c) for c in codes}
 
     benchmark: list[Bar] | None = None
     for candidate in BENCHMARKS:
         if bars_by_code.get(candidate):
             benchmark = bars_by_code[candidate]
             break
-        extra = history.load_bars(candidate)
+        extra = history.load_bars_adjusted(candidate)
         if extra:
             benchmark = extra
             break
@@ -758,7 +758,7 @@ def main() -> int:
         print("或在 config/positions.yaml 填入持股與觀察清單。")
         return 1
 
-    missing = [c for c in codes if not history.load_bars(c)]
+    missing = [c for c in codes if not history.load_bars_adjusted(c)]
     if len(missing) == len(codes):
         print("這些標的都沒有歷史日 K，無法計算。先跑：")
         print("    python3 src/history.py --months 24")
@@ -790,16 +790,66 @@ def _strip_md(text: str) -> str:
     return text.replace("**", "")
 
 
+_SECTOR_TO_GROUP = {
+    "ETF": "大盤 / ETF",
+    "半導體": "半導體",
+    "PCB": "PCB / 載板",
+    "電子代工": "伺服器 / 代工 / 網通",
+    "網通": "伺服器 / 代工 / 網通",
+    "品牌": "伺服器 / 代工 / 網通",
+    "電子零組件": "零組件 / 散熱 / 光學",
+    "光學": "零組件 / 散熱 / 光學",
+    "被動元件": "被動元件",
+    "IC 通路": "IC 通路",
+    "航運": "航運 / 航空",
+    "航空": "航運 / 航空",
+    "鋼鐵": "原物料 / 傳產",
+    "塑化": "原物料 / 傳產",
+    "塑化 / 電子材料": "原物料 / 傳產",
+    "石化": "原物料 / 傳產",
+    "電線電纜 / 不鏽鋼": "原物料 / 傳產",
+    "水泥": "原物料 / 傳產",
+    "金融": "金融",
+    "電信": "民生內需 / 電信",
+    "食品": "民生內需 / 電信",
+    "零售": "民生內需 / 電信",
+}
+
+_GROUP_ORDER = [
+    "大盤 / ETF",
+    "半導體",
+    "PCB / 載板",
+    "伺服器 / 代工 / 網通",
+    "零組件 / 散熱 / 光學",
+    "被動元件",
+    "IC 通路",
+    "航運 / 航空",
+    "原物料 / 傳產",
+    "金融",
+    "民生內需 / 電信",
+]
+
+
+def _sector_group(entry: dict | None) -> str:
+    if not entry:
+        return "其他"
+    sector = str(entry.get("sector", ""))
+    if sector in _SECTOR_TO_GROUP:
+        return _SECTOR_TO_GROUP[sector]
+    top = sector.split(" - ")[0]
+    return _SECTOR_TO_GROUP.get(top, "其他")
+
+
 def build_view(codes: list[str]) -> dict:
     """研究頁需要的一切。跟 build_report() 共用同一批計算與敘述。"""
     glossary = load_glossary()
     stocks, sector_notes = load_sectors()
 
-    bars_by_code = {c: history.load_bars(c) for c in codes}
+    bars_by_code = {c: history.load_bars_adjusted(c) for c in codes}
 
     benchmark: list[Bar] | None = None
     for candidate in BENCHMARKS:
-        bars = bars_by_code.get(candidate) or history.load_bars(candidate)
+        bars = bars_by_code.get(candidate) or history.load_bars_adjusted(candidate)
         if bars:
             benchmark = bars
             break
@@ -840,8 +890,20 @@ def build_view(codes: list[str]) -> dict:
             }
         )
 
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        gname = _sector_group(item.get("entry"))
+        grouped.setdefault(gname, []).append(item)
+    groups: list[dict] = []
+    for gname in _GROUP_ORDER:
+        if gname in grouped:
+            groups.append({"name": gname, "stocks": grouped.pop(gname)})
+    for gname, gitems in grouped.items():
+        groups.append({"name": gname, "stocks": gitems})
+
     return {
         "items": items,
+        "groups": groups,
         "has_benchmark": benchmark is not None,
         "missing": [c for c, b in bars_by_code.items() if not b],
         "glossary_count": len(glossary),

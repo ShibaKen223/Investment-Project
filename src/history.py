@@ -60,16 +60,29 @@ RETRIES = 3
 
 # 兩次請求之間至少間隔多久（秒）。這是**全域**的發送頻率上限，
 # 不是「等完上一個回應再等這麼久」——差別很大，見 _RateLimiter。
-# 可用環境變數調整：INVEST_FETCH_DELAY=0.8 python3 src/history.py
-# 調太低會被端點擋，被擋了反而更慢，不建議低於 0.5。
-POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "1.2"))
+# 可用環境變數調整：INVEST_FETCH_DELAY=8 python3 src/history.py
+#
+# 預設 4.5 是踩過坑換來的。原本設 1.2，2026-08-27 回補 14 檔（350 個月）
+# 跑到一半，www.twse.com.tw 先開始回 428，接著整個 IP 被擋掉：
+#
+#     因為安全性考量，您所執行的頁面無法呈現。
+#
+# 那次封鎖持續超過 50 分鐘，350 個月只補回 138 個。關鍵教訓是：
+# **被擋之後才調慢沒有用**——封鎖是綁 IP 的，只能等它自己解，
+# 所以「先快跑、被擋再放慢」這條路走不通，一開始就得夠慢。
+# 而且沒有備援可以繞：openapi.twse.com.tw 與 TPEX 當下都還通，
+# 但上市股的「逐月」歷史只有 www.twse.com.tw 這個端點有。
+#
+# 慢的代價是算得出來的：24 個月 × 14 檔約 25 分鐘，而且是背景在跑。
+# 被擋一次卻要等快一小時、整批還得重來，划不來。不建議低於 3。
+POLITE_DELAY = float(os.environ.get("INVEST_FETCH_DELAY", "4.5"))
 
 # 同時有幾檔在抓。併發是為了「蓋掉網路延遲」，不是為了提高發送頻率——
 # 發送頻率仍由上面的 POLITE_DELAY 全域控管，開幾個 worker 都不會送得更密，
 # 只是允許更多請求同時在路上等回應。
 #
-# 要蓋掉延遲，worker 數大約需要 延遲 ÷ 間隔。端點慢到每次 6 秒時，
-# 6 個 worker 才勉強跟得上 1.2 秒的發送節奏；worker 太少的話，
+# 要蓋掉延遲，worker 數大約需要 延遲 ÷ 間隔。間隔放寬到 4.5 秒之後，
+# 端點就算慢到每次 6 秒，2 個 worker 就跟得上了；worker 太少的話，
 # 瓶頸會從「發送頻率」變成「等回應」，那就白設限速器了。
 #
 # 預設 3：實測 5～6 個併發會讓 TWSE 開始回 read-timeout（伺服器端限流），
@@ -281,11 +294,40 @@ def load_bars(code: str) -> list[Bar]:
     return bars
 
 
+def load_bars_adjusted(code: str) -> list[Bar]:
+    """讀出**還原權值後**的日 K —— 做分析的都該用這支。
+
+    load_bars() 回傳的是檔案裡的原始價格，也就是當天真正成交的數字。
+    那是磁碟上的事實，寫檔時必須用它；但拿來算均線、期間報酬、
+    停損停利就會出事，因為除權息與股票分割會在序列裡留下假斷崖
+    （0050 在 2025-06-18 是一根 -74.8% 的 K，實際上是 1 拆 4）。
+
+    為什麼不直接讓 load_bars 預設還原：save_bars() 內部會先 load 再合併寫回，
+    如果 load 出來是還原後的價格，第一次存檔就會把還原值寫進檔案，
+    之後每存一次再還原一次——原始資料就永久毀了。
+    所以「寫檔用原始、分析用還原」這條界線要很清楚。
+
+    公司行為登記在 config/corporate_actions.yaml，見 src/adjust.py。
+    """
+    import adjust
+
+    bars = load_bars(code)
+    if not bars:
+        return bars
+    actions = adjust.load_actions().get(code)
+    if not actions:
+        return bars
+    return adjust.apply_actions(bars, actions)
+
+
 def save_bars(code: str, bars: list[Bar]) -> int:
     """合併寫入。同一天以新資料覆蓋，回傳寫入後的總筆數。
 
     合併而不是覆寫，是為了讓「從 raw 重建」和「從 TWSE 補歷史」
     可以混用，兩邊各補各的區間不會互相清掉。
+
+    ⚠️ 這裡的 load_bars() 一定要是**未還原**的版本。
+       寫回檔案的必須是當天實際成交的價格，還原只發生在讀出來做分析的時候。
     """
     with _exclusive(code):
         # 讀取也要在鎖內：讀完才合併，中間不能有別人插進來寫，

@@ -142,7 +142,9 @@ def main() -> int:
 
     if not args.quiet:
         print("抓取全市場收盤行情…", file=sys.stderr)
-    quotes = datasource.fetch_quotes(raw_dir=None if args.dry_run else RAW_DIR)
+    quotes = datasource.fetch_quotes(
+        raw_dir=None if args.dry_run else RAW_DIR, warnings=warnings
+    )
     trade_date = datasource.market_date(quotes) or date.today().isoformat()
 
     stale_days = datasource.is_stale(trade_date)
@@ -182,6 +184,30 @@ def main() -> int:
             if mset.source == monitor.SOURCE_ENGINE
             else "目前沒有登記任何未出場的持股。"
         )
+
+    # --- 除權息偵測 ---
+    # 除息當天股價會真的跌下去，但那不是虧損——你拿到了現金。
+    # 不講清楚的話，一檔配息 8% 的股票會在除息當天直接觸發 10% 停損，
+    # 而報告上會寫著「跌破停損線，規則判定該出場」。那是最貴的一種假訊號。
+    if mset.positions or mset.watchlist:
+        try:
+            import adjust
+
+            watched = [str(e.get("code", "")).strip() for e in mset.watchlist]
+            held_codes = [p.code for p in mset.positions]
+            detected = adjust.scan_quotes(quotes, held_codes + watched)
+            if not args.dry_run:
+                adjust.record_detected(detected)
+            for action in detected:
+                held = " ← 你有這檔部位，今天的停損訊號不可信"
+                warnings.append(
+                    f"🔔 {action.code} 今天疑似除權息"
+                    f"（參考價較昨收 {(action.factor - 1) * 100:+.1f}%）。"
+                    "當天的價格下跌是配息造成的，不是虧損。"
+                    f"{held if action.code in held_codes else ''}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"除權息偵測失敗（不影響其他判斷）：{exc}")
 
     evaluations, eval_warnings = monitor.evaluate_all(
         mset, quotes, base_rules, overrides

@@ -15,6 +15,7 @@
     data/paper_state.json    當前現金、持股、待執行委託（會覆寫）
     data/paper_trades.jsonl  每一筆成交（append-only，永不改寫）
     data/paper_equity.jsonl  每日淨值（append-only，畫績效曲線用）
+    data/paper_runs.jsonl    每次執行的稽核紀錄（append-only，見 append_run）
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ DATA_DIR = ROOT / "data"
 STATE_FILE = DATA_DIR / "paper_state.json"
 TRADES_FILE = DATA_DIR / "paper_trades.jsonl"
 EQUITY_FILE = DATA_DIR / "paper_equity.jsonl"
+RUNS_FILE = DATA_DIR / "paper_runs.jsonl"
 
 LOT_SIZE = 1000  # 台股一張 = 1000 股
 
@@ -710,6 +712,24 @@ def load_equity_values() -> list[float]:
         except (KeyError, TypeError, ValueError):
             continue
     return values
+
+
+def append_run(record: dict) -> None:
+    """記下「這次執行到底看到什麼」。append-only。
+
+    沒有這份紀錄，模擬倉安靜地空轉是查不出來的：畫面上「淨值 100 萬、
+    無委託」跟「掃描池整個是空的、根本沒東西可判斷」長得一模一樣。
+    淨值曲線只記結果，這裡記的是過程——掃了幾檔、幾檔資料夠、
+    幾檔出訊號、最後下了幾筆單。
+
+    出問題時第一個該看的就是這個檔案。
+    """
+    _append_jsonl(RUNS_FILE, record)
+
+
+def load_runs() -> list[dict]:
+    """讀回所有執行紀錄，最舊的在前面。"""
+    return _read_jsonl(RUNS_FILE)
 
 
 def append_equity(result: DayResult) -> None:

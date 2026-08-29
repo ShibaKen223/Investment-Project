@@ -133,33 +133,77 @@ def _parse_tpex(rows: list[dict]) -> dict[str, Quote]:
     return quotes
 
 
-def fetch_quotes(raw_dir: Path | None = None) -> dict[str, Quote]:
+def fetch_quotes(
+    raw_dir: Path | None = None, warnings: list[str] | None = None
+) -> dict[str, Quote]:
     """抓取全市場收盤行情，回傳 {股票代號: Quote}。
 
     上市優先——極少數代號在兩個市場都出現時以上市為準。
     raw_dir 有給就把原始 JSON 落地存檔（append-only，不覆寫既有日期）。
+
+    **兩個市場分開處理，一邊掛掉不會拖垮另一邊。**
+    以前是任何一邊失敗就整支拋例外，於是上櫃端點抽風的時候，
+    連上市持股的停損提醒都產不出來——那天你等於完全沒有監控。
+    兩邊都掛才是真的沒救，那時候才拋。
+
+    失敗的那一邊會寫進 warnings，日報上看得到，
+    不會讓人以為「今天上櫃標的都沒有行情」是市場的事。
     """
-    twse_rows = _get_json(TWSE_URL)
-    tpex_rows = _get_json(TPEX_URL)
+    twse_rows: list[dict] = []
+    tpex_rows: list[dict] = []
+    failures: list[str] = []
+
+    for label, url, sink in (
+        ("上市 TWSE", TWSE_URL, "twse"),
+        ("上櫃 TPEX", TPEX_URL, "tpex"),
+    ):
+        try:
+            rows = _get_json(url)
+        except RuntimeError as exc:
+            failures.append(label)
+            if warnings is not None:
+                warnings.append(
+                    f"{label} 行情抓取失敗，這次的報告不含該市場的標的。"
+                    f"（{exc}）"
+                )
+            continue
+        if sink == "twse":
+            twse_rows = rows
+        else:
+            tpex_rows = rows
+
+    if len(failures) == 2:
+        raise RuntimeError("上市與上櫃行情都抓不到，這次無法產生報告。")
 
     quotes = _parse_tpex(tpex_rows)
     quotes.update(_parse_twse(twse_rows))
 
+    # 只把成功的那一邊落地。把空清單存成當日檔案的話，
+    # 之後 --from-raw 重建會拿它當「那天沒有資料」的證據，
+    # 而且不會再被覆寫（存檔刻意不覆寫既有日期）。
     if raw_dir is not None:
-        _archive_raw(raw_dir, twse_rows, tpex_rows, quotes)
+        _archive_raw(
+            raw_dir,
+            twse_rows if twse_rows else None,
+            tpex_rows if tpex_rows else None,
+            quotes,
+        )
 
     return quotes
 
 
 def _archive_raw(
     raw_dir: Path,
-    twse_rows: list[dict],
-    tpex_rows: list[dict],
+    twse_rows: list[dict] | None,
+    tpex_rows: list[dict] | None,
     quotes: dict[str, Quote],
 ) -> None:
+    """把原始 JSON 落地。None 代表那個市場這次沒抓到，直接跳過不存。"""
     raw_dir.mkdir(parents=True, exist_ok=True)
     trade_date = market_date(quotes) or date.today().isoformat()
     for name, payload in (("twse", twse_rows), ("tpex", tpex_rows)):
+        if payload is None:
+            continue
         path = raw_dir / f"{trade_date}_{name}.json"
         if path.exists():
             continue  # 已存檔的交易日不覆寫
