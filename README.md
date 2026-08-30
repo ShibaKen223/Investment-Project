@@ -9,6 +9,8 @@
 
 ## 第一次使用
 
+### macOS
+
 **在 Finder 裡雙擊 `launch/安裝.command`**，然後照著畫面走。
 
 它會裝套件、跑測試確認裝好了、把兩個捷徑放到桌面，
@@ -33,6 +35,51 @@ pip3 install -r requirements.txt
 python3 src/history.py --months 24    # 補歷史（波段策略與研究筆記需要）
 python3 webapp/app.py                 # 開儀表板
 ```
+
+</details>
+
+### Windows
+
+沒有 `.command` 那種一鍵安裝，照下面三步走（PowerShell）：
+
+```powershell
+$env:PYTHONUTF8 = "1"        # 見下方說明，少了這行 pip 會直接失敗
+py -m pip install -r requirements.txt
+py tests\test_signals.py; py tests\test_store.py   # 確認裝好了
+```
+
+然後雙擊 `launch\dashboard.bat` 就會開儀表板（等同 macOS 的「投資儀表板」）。
+想要桌面捷徑就對它按右鍵「傳送到 → 桌面（建立捷徑）」。
+
+**Windows 特有的三個坑**，踩過才知道，先寫在這裡：
+
+| 症狀 | 原因與解法 |
+| --- | --- |
+| `python` 執行後沒有任何輸出，exit code 49 | 那是 Microsoft Store 的空殼別名，不是真的直譯器。**一律用 `py` 啟動器**，或直接指定安裝路徑。 |
+| `pip install -r requirements.txt` 噴 `UnicodeDecodeError: 'gbk' codec` | `requirements.txt` 有中文註解，pip 用系統 cp950/cp936 去解碼。先設 `PYTHONUTF8=1` 就過了。 |
+| 改了 `.bat` 之後出現 `'x' is not recognized` | `.bat` 必須是 **CRLF 換行**。Git Bash 的 heredoc 和 `sed -i` 都會寫成 LF，cmd.exe 會把 `\|\|` 那類行解析壞、而且靜靜地走錯分支。要改就用 PowerShell 或設好 `core.autocrlf` 的編輯器。 |
+
+`launch\dashboard.bat` 和 `launch\daily_run.bat` 內容刻意保持純 ASCII，
+就是為了避開第三個坑——中文只出現在 Python 的輸出，由 `chcp 65001` 加 `PYTHONUTF8` 處理。
+
+<details><summary>每日自動更新（Windows 工作排程器）</summary>
+
+macOS 用 `launch/install_daily.sh`（launchd），Windows 這邊用工作排程器，
+在 PowerShell 執行（把路徑換成你自己的）：
+
+```powershell
+$root = "C:\path\to\Investment-Project"
+$action  = New-ScheduledTaskAction -Execute "cmd.exe" `
+  -Argument "/c `"`"$root\launch\daily_run.bat`" >> `"$root\data\daily.log`" 2>&1`"" `
+  -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -Weekly `
+  -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 15:00
+Register-ScheduledTask -TaskName "台股投資決策系統-每日更新" `
+  -Action $action -Trigger $trigger -Force
+```
+
+輸出會 append 到 `data\daily.log`。
+預設只有在你登入 Windows 時才會跑；15:00 電腦沒開就跳過那天。
 
 </details>
 
@@ -67,6 +114,9 @@ bash launch/install_daily.sh
 ```
 
 週一至週五 15:00 自動抓收盤行情、產生報告。（台股 13:30 收盤，資料源約 14:00–15:00 更新。）
+
+> Windows 沒有 launchd，改用工作排程器跑 `launch\daily_run.bat`——
+> 指令在上面「第一次使用 → Windows → 每日自動更新」那一段。
 
 ```bash
 bash launch/install_daily.sh --status
@@ -426,8 +476,20 @@ config/mail.yaml        Email 設定（你自己建立，不進版控）
 data/reports/           每日報告存檔
 data/signals.jsonl      append-only 訊號紀錄  ← 覆盤的證據
 data/journal.jsonl      決策紀錄
+data/history/           歷史日 K，每檔一個 CSV（進版控，換機器 clone 就有）
+data/raw/               每日全市場原始存檔（不進版控，太大，可重抓）
 data/backups/           每次修改設定前的自動備份（保留最近 50 份）
+
+launch/安裝.command      macOS 一鍵安裝
+launch/daily_run.sh     macOS 每日排程呼叫的流程
+launch/dashboard.bat    Windows 開儀表板
+launch/daily_run.bat    Windows 每日排程呼叫的流程（daily_run.sh 的移植）
 ```
+
+`data/history/` 之所以進版控，是因為重建它要 55 檔 × 24 個月、
+被限速在 4.5 秒一次，跑快兩小時而且一直打證交所——但整包才 1 MB 出頭。
+`data/raw/` 則相反：一個交易日就 4.5 MB，一年超過 1 GB，
+需要時用 `python3 src/history.py --from-raw` 從本機存檔離線重建。
 
 ### `signals.jsonl` 是最重要的產出
 
