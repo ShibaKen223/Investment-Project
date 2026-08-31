@@ -46,6 +46,32 @@ foreach ($f in @($outTmp, $errTmp)) {
 $done = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 if ($proc.ExitCode -eq 0) {
   Add-Content -Path $log -Value "=== $done 完成 ===" -Encoding utf8
+
+  # 這台是「決策機」：模擬倉狀態只在這裡寫。跑完就推回 GitHub，
+  # 其他機器只讀（git pull 看結果），不再各自跑排程——
+  # 否則兩邊會各自成交，帳本再也對不起來（見 docs/HANDOFF.md）。
+  Push-Location $root
+  try {
+    git add data/paper_state.json data/paper_trades.jsonl data/paper_equity.jsonl `
+            data/paper_runs.jsonl data/signals.jsonl data/reports 2>$null | Out-Null
+    $staged = git diff --cached --name-only
+    if ($staged) {
+      $commitOut = git commit -m "每日更新 $stamp" 2>$null
+      Add-Content -Path $log -Value ($commitOut -join "`n") -Encoding utf8
+      $pushOut = git push 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        Add-Content -Path $log -Value "已推送模擬倉更新到 GitHub。" -Encoding utf8
+      } else {
+        Add-Content -Path $log -Value "⚠️ git push 失敗，本機資料已更新但沒有同步上去，記得手動 push：" -Encoding utf8
+        Add-Content -Path $log -Value ($pushOut -join "`n") -Encoding utf8
+      }
+    } else {
+      Add-Content -Path $log -Value "（今天沒有新的模擬倉資料需要同步。）" -Encoding utf8
+    }
+  } catch {
+    Add-Content -Path $log -Value "⚠️ git 同步時發生例外，本機資料已更新但沒有同步：$_" -Encoding utf8
+  }
+  Pop-Location
 } else {
   Add-Content -Path $log -Value "=== $done 失敗，結束碼 $($proc.ExitCode) ===" -Encoding utf8
 }

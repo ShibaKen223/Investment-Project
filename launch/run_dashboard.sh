@@ -15,6 +15,11 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
+# 這台是唯讀機：模擬倉的決策只在另一台機器跑，這裡開儀表板前
+# 先拉一次最新結果，才不會看到還沒同步過來的舊資料。
+# 拉不到（沒網路、還沒設定遠端）不該擋住儀表板開啟，所以失敗就跳過。
+git pull --ff-only 2>/dev/null || true
+
 URL="http://127.0.0.1:5173/"
 LOG="$ROOT/data/app.log"
 mkdir -p "$ROOT/data"
