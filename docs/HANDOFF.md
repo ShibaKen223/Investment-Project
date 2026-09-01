@@ -83,6 +83,53 @@ _lib.ps1                        共用：路徑解析、Python 偵測、UTF-8 �
 
 ---
 
+## 2026-09-01：排程斷線後補跑的教訓 + 跨機器同步自動化
+
+`InvestmentDailyUpdate` 從 8/22 起沒有真正跑完過，9/1 才恢復。過程中踩了兩個坑，
+之後接手的人（或 Claude session）遇到「排程斷了一陣子」時，照這個順序處理：
+
+**1. 工作排程器被中止（結束碼 267014 / `SCHED_S_TASK_TERMINATED`）不是只有電池一種原因。**
+上一輪只修了 `DisallowStartIfOnBatteries`/`StopIfGoingOnBatteries`，結果排程還是被中止過一次
+（`daily_run.ps1` 連 log 的第一行都沒寫到就被砍）。後來確認 `WakeToRun` 是關的——
+電腦如果在排定時間處於睡眠，工作排程器不會喚醒它，任務直接跳過或被中止。
+已改成打開。如果之後還是偶發性中止，下一個該查的是 `Principal.LogonType`
+（目前是 `Interactive`，需要有登入的工作階段；`Password` 類型不論登入與否都會執行，
+但需要在 `Set-ScheduledTask` 時輸入一次 Windows 密碼，不能純腳本代勞）。
+
+**2. `main.py` 沒有逐日補跑機制，排程斷線超過一天會憑空跳過中間的交易日。**
+`trade_date = datasource.market_date(quotes) or date.today()`——它永遠只處理
+「資料源目前給的那一天」，不會知道自己漏跑了幾天。9/1 排程恢復時，
+`paper_state.json` 的 `last_date` 還停在 8/21，資料源給的是 8/31，
+於是引擎直接把 8/22～8/30 這 9 個交易日的訊號全部跳過，
+2881 那筆 8/21 決定的委託單也因此用 8/31（而非正確的 8/24 開盤）的價格成交。
+
+**補救方式**（已經做過一次，之後排程再斷線可以照搬）：
+1. 用 `git checkout -- data/paper_state.json data/paper_equity.jsonl data/paper_runs.jsonl`
+   把這幾個檔案復原回最後一次 commit（斷線前）的狀態——前提是排程搶跑的結果
+   還沒 push，還來得及復原。
+2. 確認 `data/history/` 已經補齊斷線期間的日 K（`history.py --months N` + `--status` 檢查無缺口）。
+3. 寫一支一次性腳本，讀 `paper_state.json` 的 `last_date`，
+   找出所有 `> last_date` 且早於「今天」的交易日，依序呼叫 `paper.run_day()`
+   逐日推進（每天呼叫 `append_trade`/`append_equity`/`save_state`/`append_run`），
+   而不是讓 `main.py` 一次跳過去。
+4. 補跑完再 commit + push。
+
+**TWSE 封鎖是真的會反覆發生的**，不是只有 8/27 那次。這次的「全部 54 檔查無資料」
+一開始被誤判成程式或資料問題，後來用 `history.py --self-test`
+（唯一會印出真正 HTTP 狀態碼/例外訊息的路徑，其他地方失敗都被 `detect_market()`
+吞掉變成「查無資料」）才確認是封鎖。之後遇到大量「查無資料」，
+第一步永遠是先跑 `--self-test`，不要急著調大 `--months` 或加平行度硬撞。
+
+**跨機器同步已經自動化，不用再手動複製 `paper_state.json`。**
+`launch/win/daily_run.ps1`（Windows，決策機）跑完 `main.py` 成功後會自動
+`git add` + `commit` + `push` 模擬倉相關檔案；`launch/run_dashboard.sh`（Mac，唯讀端）
+開儀表板前會自動 `git pull --ff-only`。這代表下面「只能有一台機器同時跑排程」
+那條規則現在有自動化保護了，但**前提是 Mac 那邊要先移除自己的 LaunchAgent**
+（`bash launch/install_daily.sh --uninstall`），否則 Mac 還是會繼續自己跑、自己寫
+`paper_state.json`，跟 Windows push 上來的版本衝突。
+
+---
+
 ## 在新機器上開起來
 
 ```bash
