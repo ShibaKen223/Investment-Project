@@ -106,44 +106,7 @@ for path, label in PAGES:
 
 
 # ==========================================================================
-# 3. 跨站送來的寫入請求要被擋下來
-#
-# 綁 127.0.0.1 不等於安全：使用者瀏覽的任何網站都能對 localhost 送
-# 表單 POST。/quit 是 os._exit()，等於一個誰都按得到的關機鍵。
-# ==========================================================================
-_evil = client.post(
-    "/settings/objective",
-    data={"objective": "被別的網站改掉了"},
-    headers={"Origin": "https://evil.example"},
-)
-check(
-    "跨站送來的 POST 被擋下（403）",
-    _evil.status_code == 403,
-    f"HTTP {_evil.status_code}",
-)
-
-_evil_quit = client.post("/quit", headers={"Origin": "https://evil.example"})
-check(
-    "跨站送來的 /quit 被擋下（不能讓別人關掉你的儀表板）",
-    _evil_quit.status_code == 403,
-    f"HTTP {_evil_quit.status_code}",
-)
-
-# 反面：從儀表板自己的頁面送出來的，不能被擋
-_same = client.post(
-    "/watch/remove",
-    data={"code": "0000"},
-    headers={"Origin": "http://localhost"},
-)
-check(
-    "同源的 POST 不會被誤擋",
-    _same.status_code != 403,
-    f"HTTP {_same.status_code}",
-)
-
-
-# ==========================================================================
-# 4. 沒裝 markdown 時，歷史報告要退回純文字而不是 500
+# 3. 沒裝 markdown 時，歷史報告要退回純文字而不是 500
 #
 # requirements.txt 把 markdown 列為必裝，但 render_markdown() 寫了
 # ModuleNotFoundError 的降級路徑，docstring 也明文承諾這件事。

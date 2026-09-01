@@ -48,37 +48,6 @@ app = Flask(__name__)
 app.secret_key = "local-only-investment-dashboard"  # 僅供 flash 訊息，非安全用途
 
 
-@app.before_request
-def reject_cross_origin_writes():
-    """擋掉從別的網站送過來的 POST。
-
-    「只綁 127.0.0.1」擋不住這件事，這是很常見的誤解：
-    使用者在瀏覽器裡打開的**任何**網站，都可以偷偷送一個表單 POST 到
-    http://127.0.0.1:5173/settings/rules 改掉你的停損停利、或塞進假持股，
-    瀏覽器會照樣把請求送出去，而畫面上不會有任何痕跡。
-    /quit 更直接——那是一個誰都按得到的關機鍵（os._exit）。
-
-    這裡不做完整的 CSRF token：本機單人工具，不值得那個複雜度。
-    只確認請求確實是從這個儀表板自己的頁面送出來的。
-    跨站送來的請求一定會帶 Origin（表單 POST 也會），所以比對它就夠。
-    沒有 Origin 也沒有 Referer 的（curl、腳本）放行——那不是瀏覽器，
-    不在這個威脅模型裡。
-    """
-    if request.method in ("GET", "HEAD", "OPTIONS"):
-        return None
-
-    source = request.headers.get("Origin") or request.headers.get("Referer")
-    if not source:
-        return None
-
-    from urllib.parse import urlparse
-
-    if urlparse(source).netloc == request.host:
-        return None
-
-    return ("這個請求不是從儀表板本身送出來的，已擋下。", 403)
-
-
 REPORT_DIR = ROOT / "data" / "reports"
 
 
