@@ -568,6 +568,11 @@ paper.DATA_DIR = _tmp
 paper.TRADES_FILE = _tmp / "paper_trades.jsonl"
 paper.EQUITY_FILE = _tmp / "paper_equity.jsonl"
 paper.STATE_FILE = _tmp / "paper_state.json"
+# 五個路徑要一起改。paper.py 是在 import 時就從 DATA_DIR 算出它們的，
+# 只改 DATA_DIR 不會連動——這一段目前沒有呼叫到 append_run()，
+# 所以漏掉 RUNS_FILE 還沒出事，但那只是運氣，加一條斷言就會寫進
+# 版控裡的 data/paper_runs.jsonl。（test_paperdaily.py 就真的踩到了。）
+paper.RUNS_FILE = _tmp / "paper_runs.jsonl"
 
 for _t in sample:
     paper.append_trade(_t)

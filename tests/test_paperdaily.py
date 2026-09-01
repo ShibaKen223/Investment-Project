@@ -51,6 +51,12 @@ paper.DATA_DIR = TMP
 paper.STATE_FILE = TMP / "paper_state.json"
 paper.TRADES_FILE = TMP / "paper_trades.jsonl"
 paper.EQUITY_FILE = TMP / "paper_equity.jsonl"
+# RUNS_FILE 一定要一起改掉。paper.py 是在 import 時就用 DATA_DIR 算出
+# 這五個路徑的，所以只改 DATA_DIR 沒有用——漏掉哪一個，那一個就會寫進
+# 真正的 data/ 底下。這支測試漏掉它的時候，_log_run() 把 7 筆假紀錄
+# （trade_date 2026-08-07、universe 1）寫進了版控裡的 paper_runs.jsonl，
+# 而那份檔案正是「這套規則當時做了什麼決定」的稽核證據。
+paper.RUNS_FILE = TMP / "paper_runs.jsonl"
 
 CODE = "8888"
 CONFIG = {
