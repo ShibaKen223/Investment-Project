@@ -58,6 +58,11 @@ CONFIG = {
     "account": {"initial_cash": 1_000_000, "position_pct": 20.0, "max_positions": 5},
     "costs": {"fee_discount": 0.6, "slippage_pct": 0.1},
     "strategy": {"stop_mode": "pct", "stop_loss_pct": 8.0, "take_profit_pct": 15.0},
+    # 這支測試只用一檔標的，而 data_guard 預設要求掃描池裡至少 10 檔
+    # 「資料足夠」才算數（那道保護是這支測試寫完之後才加的）。
+    # 這裡明確關掉，才不會每一項都被判成「今天不算數」。
+    # data_guard 本身由 tests/test_paper.py 負責驗。
+    "data_guard": {"min_ready_codes": 0},
 }
 
 paperdaily.load_config = lambda: CONFIG                    # type: ignore[assignment]
