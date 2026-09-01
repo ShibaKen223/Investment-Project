@@ -560,6 +560,7 @@ print("--- 累計績效的來源是紀錄檔，不是帳戶狀態 ---")
 # 所以「完成交易 N 筆」每天都從零開始，而且網頁跟報告會顯示兩個不同的數字。
 
 import json       # noqa: E402
+import shutil  # noqa: E402
 import tempfile  # noqa: E402
 
 _tmp = Path(tempfile.mkdtemp(prefix="paper-test-"))
@@ -804,6 +805,82 @@ check(
     "dry-run 不寫稽核紀錄",
     len(paper.load_runs()) == _before,
 )
+
+# --------------------------------------------------------------------------
+# 排程斷線：last_date 與今天之間漏掉的交易日
+#
+# 2026-08-22~08-30 共 9 個交易日被靜默跳過，2881 那筆 8/21 決定的委託
+# 因此用 8/31（而非 8/24）的開盤價成交。守的就是「不准跳過去」。
+# --------------------------------------------------------------------------
+
+_gap_tmp = Path(tempfile.mkdtemp(prefix="paper-gap-"))
+paper.DATA_DIR = _gap_tmp
+paper.TRADES_FILE = _gap_tmp / "paper_trades.jsonl"
+paper.EQUITY_FILE = _gap_tmp / "paper_equity.jsonl"
+paper.STATE_FILE = _gap_tmp / "paper_state.json"
+paper.RUNS_FILE = _gap_tmp / "paper_runs.jsonl"
+
+_install_fake_history({f"900{i}": _rich for i in range(12)}, min_ready=10)
+
+# 讓引擎停在第 41 根 K，然後叫它跑最後一根——中間隔了 38 個交易日。
+_stale = paper.load_state(1_000_000.0)
+_stale.last_date = _rich[40].date
+paper.save_state(_stale)
+_expected_missing = [b.date for b in _rich[41:-1]]
+
+_gap = paperdaily.run_daily(_rich_day, {}, dry_run=False)
+check(
+    "中間漏掉交易日時拒絕執行，而不是安靜跳過去",
+    _gap.get("gap") is True,
+    str(_gap)[:160],
+)
+check(
+    "漏掉的交易日要全部列出來",
+    _gap.get("missing_days") == _expected_missing,
+    f"{len(_gap.get('missing_days') or [])} != {len(_expected_missing)}",
+)
+check(
+    "被擋下來時不能推進 last_date（推了就再也補不回來）",
+    paper.load_state(1_000_000.0).last_date == _rich[40].date,
+    paper.load_state(1_000_000.0).last_date,
+)
+check(
+    "被擋下來時不能寫淨值",
+    not paper.EQUITY_FILE.exists(),
+)
+check(
+    "訊息要告訴人怎麼補跑",
+    "--catch-up" in _gap.get("skipped", ""),
+    _gap.get("skipped", "")[:160],
+)
+
+# 帶 catch_up 就逐日推進，而不是一次跳到今天
+_caught = paperdaily.run_daily(_rich_day, {}, dry_run=False, catch_up=True)
+check(
+    "catch_up 會真的把模擬倉跑起來",
+    "result" in _caught,
+    str(_caught)[:160],
+)
+check(
+    "catch_up 之後 last_date 推進到今天",
+    paper.load_state(1_000_000.0).last_date == _rich_day,
+    paper.load_state(1_000_000.0).last_date,
+)
+check(
+    "補跑是一天一筆淨值，不是只記今天一筆",
+    len(paper.load_equity_values()) == len(_expected_missing) + 1,
+    f"{len(paper.load_equity_values())} 筆，預期 {len(_expected_missing) + 1} 筆",
+)
+
+# 沒有缺口時不該被誤擋（同一天重跑仍然走既有的 already_ran 分支）
+_again = paperdaily.run_daily(_rich_day, {}, dry_run=False)
+check(
+    "沒有缺口時不會被缺口保護誤擋",
+    _again.get("gap") is None,
+    str(_again)[:160],
+)
+
+shutil.rmtree(_gap_tmp, ignore_errors=True)
 
 _history.universe_from_config = _orig_universe
 _history.load_bars = _orig_load_bars

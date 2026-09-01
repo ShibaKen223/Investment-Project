@@ -153,19 +153,38 @@ def run(
 BENCHMARK_CODE = "0050"
 
 
-def benchmark_return(
+def benchmark_stats(
     code: str, start: str, end: str
-) -> tuple[float | None, str, str]:
-    """基準的買進持有報酬（%），以及實際涵蓋的起訖日。
+) -> tuple[float | None, float | None, str, str]:
+    """基準的買進持有報酬（%）、最大回撤（%），以及實際涵蓋的起訖日。
 
     一定要用還原權值後的價格。0050 在 2025-06-18 做過 1 拆 4，
     用原始價格算出來的「買進持有」是 −44%，實際上是 +123%——
     拿那個數字當基準，任何策略看起來都會像天才。
+
+    回撤一定要跟報酬一起算。只印報酬會讓「輸給基準」這句話誤導人：
+    這套策略平均曝險不到五成，在多頭裡本來就不可能贏過滿倉的指數，
+    但它的回撤也小得多（實測 −9% vs −27%）。
+    只看報酬會得到「策略沒用」的結論，然後開始調參數去追一個
+    結構上追不到的數字——那正是 config/paper.yaml 開頭警告的
+    自我欺騙路徑。所以把風險那一半也印出來，讓比較是公平的。
     """
     bars = [b for b in history.load_bars_adjusted(code) if start <= b.date <= end]
     if len(bars) < 2 or bars[0].close <= 0:
-        return None, "", ""
-    return (bars[-1].close / bars[0].close - 1) * 100, bars[0].date, bars[-1].date
+        return None, None, "", ""
+
+    ret = (bars[-1].close / bars[0].close - 1) * 100
+
+    peak = bars[0].close
+    mdd = 0.0
+    for bar in bars:
+        if bar.close > peak:
+            peak = bar.close
+        drawdown = (bar.close / peak - 1) * 100
+        if drawdown < mdd:
+            mdd = drawdown
+
+    return ret, mdd, bars[0].date, bars[-1].date
 
 
 def print_report(
@@ -192,9 +211,9 @@ def print_report(
     # 沒有對照組的報酬數字沒有意義：多頭裡隨便買都會賺。
     # strategy.yaml 的 objective 明文寫著要贏 0050 買進持有，
     # 那就該把那個數字印在旁邊，而不是讓人自己去算。
-    bench = bench_start = bench_end = None
+    bench = bench_mdd = bench_start = bench_end = None
     if curve_dates:
-        bench, bench_start, bench_end = benchmark_return(
+        bench, bench_mdd, bench_start, bench_end = benchmark_stats(
             BENCHMARK_CODE, curve_dates[0], curve_dates[-1]
         )
     if bench is not None:
@@ -204,6 +223,21 @@ def print_report(
         print(f"{BENCHMARK_CODE} 買進持有  {bench:>13.2f}%   "
               f"（{bench_start} ~ {bench_end}）")
         print(f"超額報酬      {gap:>13.2f}%   {verdict}")
+
+        # 風險調整後的對照。報酬輸不代表策略沒用——
+        # 要先看它是用多少回撤換來的。
+        if bench_mdd is not None:
+            print(f"{BENCHMARK_CODE} 最大回撤  {bench_mdd:>13.2f}%")
+            own_mdd = abs(stats["max_drawdown_pct"])
+            bench_abs = abs(bench_mdd)
+            if own_mdd > 0 and bench_abs > 0:
+                own_ratio = stats["total_return_pct"] / own_mdd
+                bench_ratio = bench / bench_abs
+                better = "✅ 優於基準" if own_ratio > bench_ratio else "❌ 不如基準"
+                print(f"報酬/最大回撤 {own_ratio:>13.2f}    "
+                      f"（基準 {bench_ratio:.2f}）{better}")
+                print("              ↑ 每承擔 1% 回撤換到幾 % 報酬。"
+                      "曝險差很多時，這個比報酬本身公平。")
     elif curve_dates:
         print("-" * 62)
         print(f"{BENCHMARK_CODE} 買進持有            —   "
@@ -252,11 +286,42 @@ def print_report(
                 f"  已抱 {pos.bars_held} 根"
             )
 
-    _print_objective_check(stats, bench, result, account)
+    _print_objective_check(stats, bench, bench_mdd, result, account)
+
+
+def _risk_adjusted_check(
+    stats: dict, bench: float | None, bench_mdd: float | None
+) -> tuple[str, bool | None, str]:
+    """把「贏過 0050」這條門檻換成風險調整後的版本。
+
+    原本寫的是「總報酬需勝過 0050 買進持有」，但這套策略平均曝險
+    只有四成多，拿它去比 100% 曝險的指數，在多頭裡結構上就贏不了。
+    照那條門檻判下去只有兩個結果：誤判一個正在做它該做的事的系統
+    為失敗，或是開始調參數去追一個追不到的數字——後者正是
+    config/paper.yaml 開頭警告的自我欺騙路徑。
+
+    改成比「每承擔 1% 回撤換到幾 % 報酬」。想回到原本的定義，
+    在 strategy.yaml 的 changelog 留一行再改這裡。
+    """
+    label = f"報酬/最大回撤 ≥ {BENCHMARK_CODE} 同期"
+    own_mdd = abs(stats["max_drawdown_pct"])
+    if bench is None or bench_mdd is None or not bench_mdd or not own_mdd:
+        return (label, None, "無法比較")
+    own_ratio = stats["total_return_pct"] / own_mdd
+    bench_ratio = bench / abs(bench_mdd)
+    return (
+        label,
+        own_ratio > bench_ratio,
+        f"{own_ratio:.2f} vs {bench_ratio:.2f}",
+    )
 
 
 def _print_objective_check(
-    stats: dict, bench: float | None, result: RunResult, account: Account
+    stats: dict,
+    bench: float | None,
+    bench_mdd: float | None,
+    result: RunResult,
+    account: Account,
 ) -> None:
     """把結果直接對照 strategy.yaml 裡自己訂的門檻。
 
@@ -288,11 +353,11 @@ def _print_objective_check(
             f"{stats['max_drawdown_pct']:.2f}%",
         ),
         (
-            f"總報酬勝過 {BENCHMARK_CODE} 買進持有",
-            None if bench is None else stats["total_return_pct"] > bench,
-            "無法比較" if bench is None
-            else f"{stats['total_return_pct']:.2f}% vs {bench:.2f}%",
+            f"交易分布 ≥ 15 檔標的",
+            len({t.code for t in account.trades}) >= 15,
+            f"{len({t.code for t in account.trades})} 檔",
         ),
+        _risk_adjusted_check(stats, bench, bench_mdd),
     ]
 
     for label, passed, actual in checks:

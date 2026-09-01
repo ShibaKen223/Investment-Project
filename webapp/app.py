@@ -47,6 +47,38 @@ from portfolio import (  # noqa: E402
 app = Flask(__name__)
 app.secret_key = "local-only-investment-dashboard"  # 僅供 flash 訊息，非安全用途
 
+
+@app.before_request
+def reject_cross_origin_writes():
+    """擋掉從別的網站送過來的 POST。
+
+    「只綁 127.0.0.1」擋不住這件事，這是很常見的誤解：
+    使用者在瀏覽器裡打開的**任何**網站，都可以偷偷送一個表單 POST 到
+    http://127.0.0.1:5173/settings/rules 改掉你的停損停利、或塞進假持股，
+    瀏覽器會照樣把請求送出去，而畫面上不會有任何痕跡。
+    /quit 更直接——那是一個誰都按得到的關機鍵（os._exit）。
+
+    這裡不做完整的 CSRF token：本機單人工具，不值得那個複雜度。
+    只確認請求確實是從這個儀表板自己的頁面送出來的。
+    跨站送來的請求一定會帶 Origin（表單 POST 也會），所以比對它就夠。
+    沒有 Origin 也沒有 Referer 的（curl、腳本）放行——那不是瀏覽器，
+    不在這個威脅模型裡。
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    if not source:
+        return None
+
+    from urllib.parse import urlparse
+
+    if urlparse(source).netloc == request.host:
+        return None
+
+    return ("這個請求不是從儀表板本身送出來的，已擋下。", 403)
+
+
 REPORT_DIR = ROOT / "data" / "reports"
 
 
@@ -241,12 +273,7 @@ def build_view(force_refresh: bool = False) -> dict:
     positions_doc = store.load_positions_doc()
 
     rules_cfg = strategy.get("rules") or {}
-    base_rules = Rules(
-        stop_loss_pct=float(rules_cfg.get("stop_loss_pct", 10.0)),
-        take_profit_pct=float(rules_cfg.get("take_profit_pct", 22.0)),
-        stop_basis=str(rules_cfg.get("stop_basis", "cost")),
-        near_threshold_pct=float(rules_cfg.get("near_threshold_pct", 3.0)),
-    )
+    base_rules = Rules.from_config(rules_cfg)
     overrides = {
         str(k): v for k, v in (strategy.get("overrides") or {}).items() if v
     }
@@ -511,12 +538,7 @@ def settings():
     return render_template(
         "settings.html",
         objective=str(strategy.get("objective") or "").strip(),
-        rules=Rules(
-            stop_loss_pct=float(rules_cfg.get("stop_loss_pct", 10.0)),
-            take_profit_pct=float(rules_cfg.get("take_profit_pct", 22.0)),
-            stop_basis=str(rules_cfg.get("stop_basis", "cost")),
-            near_threshold_pct=float(rules_cfg.get("near_threshold_pct", 3.0)),
-        ),
+        rules=Rules.from_config(rules_cfg),
         changelog=list(strategy.get("changelog") or [])[::-1],
     )
 
@@ -572,8 +594,10 @@ def history_report(trade_date: str):
     """打開單一天的報告全文（含模擬倉那一段）。"""
     import re
 
-    import markdown as _md
-    from markupsafe import Markup
+    # 這裡原本還有 `import markdown as _md` 與 `from markupsafe import Markup`，
+    # 兩個都沒有被用到，但那個 import markdown 是**無條件**的——
+    # 於是沒裝 markdown 時這頁會 500，而不是像 render_markdown()
+    # 說好的那樣退回純文字。降級路徑只在 render_markdown() 裡面。
 
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", trade_date):
         return redirect(url_for("history"))
@@ -610,11 +634,27 @@ def paper_page():
         # 顯示一則看得懂的訊息，而不是一頁 500，也不是假裝帳戶是空的。
         return render_template("paper.html", enabled=True, broken=str(exc))
 
+    # 抓不到行情就降級用快取——但一定要說出來。
+    # 原本這裡把例外整個丟掉（連名字都沒綁），畫面上沒有任何痕跡：
+    # 下面 current_price 會退回 pos.entry_price，於是未實現損益
+    # 整欄顯示為 0，看起來像「今天剛好都沒漲跌」。
+    # 「數字照樣漂亮，只是錯的」正是這個專案最想避免的失敗方式。
+    quote_warning = None
     try:
         quotes, fetched_at, _ = store.get_quotes(force=False)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         cached = store.cached_quotes_or_none()
         quotes, fetched_at = cached if cached else ({}, None)
+        if fetched_at is not None:
+            quote_warning = (
+                f"這次連線抓取失敗（{exc}），下面用的是 "
+                f"{fetched_at.strftime('%m/%d %H:%M')} 的快取報價。"
+            )
+        else:
+            quote_warning = (
+                f"這次連線抓取失敗（{exc}），而且沒有可用的快取報價——"
+                "下面的「現價」全部退回進場價，未實現損益不是真的，請不要據此做決定。"
+            )
 
     holdings = []
     for code, pos in account.positions.items():
@@ -681,6 +721,7 @@ def paper_page():
         equity_now=equity_now,
         latest_report=latest_report,
         fetched_at=fetched_at,
+        quote_warning=quote_warning,
     )
 
 

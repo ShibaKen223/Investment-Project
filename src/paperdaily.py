@@ -104,12 +104,36 @@ def _log_run(record: dict, dry_run: bool) -> None:
         pass   # 稽核紀錄寫不進去，不該讓整份日報產不出來
 
 
+def _missing_trading_days(
+    universe: dict[str, Series], last_date: str, trade_date: str
+) -> list[str]:
+    """last_date 與 trade_date 之間、還沒被處理過的交易日。
+
+    交易日直接從歷史資料本身推導（所有標的看得到的日期取聯集），
+    不維護假日表——農曆年、颱風假、補班日自動處理，
+    理由跟 history.py 推導「那個月應該有幾根 K」是同一個。
+    """
+    if not last_date or not trade_date or last_date >= trade_date:
+        return []
+    seen: set[str] = set()
+    for series in universe.values():
+        for bar in series.bars:
+            if last_date < bar.date < trade_date:
+                seen.add(bar.date)
+    return sorted(seen)
+
+
 def run_daily(
     trade_date: str,
     quotes: dict[str, Quote],
     dry_run: bool = False,
+    catch_up: bool = False,
 ) -> dict | None:
-    """跑一天的模擬倉。回傳給報告用的 dict；未啟用時回傳 None。"""
+    """跑一天的模擬倉。回傳給報告用的 dict；未啟用時回傳 None。
+
+    catch_up=True 時，會把 last_date 到 trade_date 之間漏掉的交易日
+    依序補跑完再跑今天；預設 False，遇到缺口直接拒絕執行（見下面說明）。
+    """
     config = load_config()
     if not is_enabled(config):
         return None
@@ -205,6 +229,39 @@ def run_daily(
         )
         return {"skipped": message, "insufficient": True, **base_log}
 
+    # --- 排程斷線保護 ---
+    # run_day() 只認「你叫它跑哪一天」，不會發現自己漏了幾天。
+    # 排程斷線超過一天再恢復時，資料源給的是最新那天，
+    # 於是中間的交易日整段憑空消失：不報錯、數字照樣算得出來，
+    # 但那幾天的訊號沒被記錄，而且昨天決定的委託會用錯誤的開盤價成交。
+    # 實際發生過：2026-08-22~08-30 共 9 個交易日被跳過，
+    # 2881 那筆 8/21 決定的委託用 8/31（而非 8/24）的開盤價成交。
+    #
+    # monitor.staleness_warning() 抓得到這件事，但它在 main.py 裡是
+    # 「引擎跑完之後」才檢查的——那時 last_date 已經被推到今天，
+    # 警告永遠不會觸發。所以這道保護一定要在成交之前。
+    missing = _missing_trading_days(universe, account.last_date, trade_date)
+    if missing and not catch_up:
+        shown = "、".join(missing[:5]) + ("… 等" if len(missing) > 5 else "")
+        message = (
+            f"⚠️ **今天不算數**：模擬倉停在 {account.last_date}，"
+            f"但現在要跑的是 {trade_date}，中間有 {len(missing)} 個交易日沒跑過"
+            f"（{shown}）。\n"
+            "> \n"
+            "> 直接跑今天會讓那幾天的訊號永久消失，"
+            "昨天決定的委託也會用錯誤的開盤價成交，所以**這一天沒有被記錄下來**。\n"
+            "> \n"
+            "> 補跑：先確認歷史沒有缺口"
+            "（`python3 src/history.py --months 2` 與 `--fill-gaps`），"
+            "再跑 `python3 src/main.py --catch-up` 逐日推進。"
+        )
+        _log_run(
+            {**base_log, "status": "gap_detected", "missing_days": len(missing),
+             "last_date": account.last_date},
+            dry_run,
+        )
+        return {"skipped": message, "gap": True, "missing_days": missing, **base_log}
+
     # 訊號數只是給稽核紀錄用的，run_day 內部會自己重算一次。
     entry_signals = 0
     for code in ready:
@@ -216,15 +273,21 @@ def run_daily(
             entry_signals += 1
 
     before_trades = len(account.trades)
-    result = paper.run_day(
-        account, trade_date, universe, params, account_params, costs
-    )
 
-    if not dry_run:
-        for trade in account.trades[before_trades:]:
-            paper.append_trade(trade)
-        paper.append_equity(result)
-        paper.save_state(account)
+    # 補跑時一天一天推進，不是直接跳到今天——每一天都要各自成交、
+    # 各自記淨值，中間那些天的委託才會用它們自己的開盤價。
+    dates_to_run = (missing if catch_up else []) + [trade_date]
+    result = None
+    for run_date in dates_to_run:
+        day_before = len(account.trades)
+        result = paper.run_day(
+            account, run_date, universe, params, account_params, costs
+        )
+        if not dry_run:
+            for trade in account.trades[day_before:]:
+                paper.append_trade(trade)
+            paper.append_equity(result)
+            paper.save_state(account)
 
     # 績效一律以 append-only 的紀錄檔為準，不要用 account.trades——
     # load_state() 不還原歷史成交，account.trades 只有「這次執行剛平倉」的那幾筆，
