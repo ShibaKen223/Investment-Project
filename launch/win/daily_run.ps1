@@ -51,6 +51,35 @@ function Invoke-Step {
 $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 Add-Content -Path $log -Value "=== $stamp 每日更新開始 ===" -Encoding utf8
 
+# ── 先把遠端的帳本拉下來再跑 ─────────────────────────────────
+# 這一步原本沒有，而少了它「只能一台機器跑排程」那條規則就是空話：
+# 這台機器會拿一份過期的 paper_state.json 繼續往前跑，然後把
+# 一本跟遠端對不起來的帳推上去。實際發生過（2026-08）——
+# origin/main 記的是 2881 在 8/28 @ 141.141，另一台記的是
+# 8/24 @ 135.135，兩本帳都沒報錯。
+#
+# --ff-only 是刻意的：能快轉就快轉，已經分岔就讓它失敗並中止今天，
+# 而不是自動 merge 出第三本帳。分岔要人來決定留哪一邊
+# （見 .gitattributes 與 docs/HANDOFF.md）。
+Push-Location $root
+try {
+  $pullOut = git pull --ff-only 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Add-Content -Path $log -Value "⚠️ git pull --ff-only 失敗，今天不執行——本機與遠端的帳本可能已經分岔：" -Encoding utf8
+    Add-Content -Path $log -Value ($pullOut -join "`n") -Encoding utf8
+    Add-Content -Path $log -Value "   先處理分岔（決定哪一台是決策機），再手動跑一次。" -Encoding utf8
+    Add-Content -Path $log -Value '' -Encoding utf8
+    Pop-Location
+    exit 1
+  }
+  Add-Content -Path $log -Value ($pullOut -join "`n") -Encoding utf8
+} catch {
+  Add-Content -Path $log -Value "⚠️ git pull 發生例外，今天不執行：$_" -Encoding utf8
+  Pop-Location
+  exit 1
+}
+Pop-Location
+
 # ── 順序很重要，而且順序本身就是一個 bug 修正 ──────────────────
 # 這三步必須跟 macOS 的 launch/daily_run.sh 一致。
 # 之前這支只跑第 3 步，於是 Windows（現在唯一的決策機）從來沒有

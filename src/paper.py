@@ -195,6 +195,13 @@ class Account:
     trades: list[Trade] = field(default_factory=list)
     last_date: str = ""
 
+    # 上一次寫這本帳的機器。狀態檔在版控裡，兩台機器各自跑排程時
+    # 會產生兩本互相矛盾的帳，而 git 只會把它當文字合併或直接覆蓋——
+    # 實際發生過：origin/main 的 2881 是「8/21 的訊號、8/28 的成交價」，
+    # 本機同一筆卻是 8/24 @ 135.135。兩邊都不報錯，畫面都很正常。
+    # 有了這個欄位，paperdaily 才能在成交之前發現「這本帳不是我的」。
+    owner: str = ""
+
     def equity(self, prices: dict[str, float]) -> float:
         """淨值 = 現金 + 持股市值。查不到報價的持股用進場價估。"""
         holdings = sum(
@@ -207,6 +214,7 @@ class Account:
         return {
             "cash": round(self.cash, 2),
             "last_date": self.last_date,
+            "owner": self.owner,
             "positions": {c: asdict(p) for c, p in self.positions.items()},
             "pending": [asdict(o) for o in self.pending],
         }
@@ -223,6 +231,7 @@ class Account:
         return cls(
             cash=float(raw.get("cash", 0.0)),
             last_date=str(raw.get("last_date", "")),
+            owner=str(raw.get("owner", "")),
             positions={
                 code: PaperPosition(**data)
                 for code, data in (raw.get("positions") or {}).items()

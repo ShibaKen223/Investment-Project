@@ -225,6 +225,87 @@ try:
         str(again),
     )
 
+    # ======================================================================
+    # 擁有權保護：兩台機器不能各記一本帳
+    # ======================================================================
+    # 這道保護的價值全在「擋下來的時候什麼都沒發生」。
+    # 只擋住成交但仍然寫了 last_date，會比不擋還糟：那一天被鎖住，
+    # 之後拿正確的帳本回來也補不回來了。
+    reset_state()
+    first = paperdaily.run_daily(TODAY, TODAY_QUOTE, dry_run=False)
+    check(
+        "第一次跑（owner 是空的）等於自動認領，不會被擋",
+        first is not None and "skipped" not in first,
+        str(first),
+    )
+    check(
+        "跑完之後狀態檔記下了這台機器",
+        paper.load_state(1_000_000.0).owner == paperdaily.this_machine(),
+        paper.load_state(1_000_000.0).owner,
+    )
+
+    # 換一台機器來寫同一本帳。
+    reset_state()
+    stolen = paper.load_state(1_000_000.0)
+    stolen.owner = "另一台機器"
+    paper.save_state(stolen)
+
+    blocked = paperdaily.run_daily(TODAY, TODAY_QUOTE, dry_run=False)
+    check(
+        "別台機器的帳本會被擋下來",
+        blocked is not None and blocked.get("owner_mismatch") is True,
+        str(blocked),
+    )
+    after = paper.load_state(1_000_000.0)
+    check(
+        "被擋下來時 last_date 沒有被推進",
+        after.last_date == YESTERDAY,
+        f"{YESTERDAY} → {after.last_date}",
+    )
+    check(
+        "被擋下來時昨天的委託沒有成交",
+        len(after.pending) == 1 and not after.positions,
+        f"pending={len(after.pending)} positions={list(after.positions)}",
+    )
+    check(
+        "被擋下來時 owner 沒有被偷偷改掉",
+        after.owner == "另一台機器",
+        after.owner,
+    )
+    check(
+        "擋下來的訊息講得出兩邊分別是誰",
+        "另一台機器" in blocked.get("skipped", "")
+        and paperdaily.this_machine() in blocked.get("skipped", ""),
+        blocked.get("skipped", ""),
+    )
+
+    # --claim-owner 是刻意的接手動作，要能跑得動。
+    claimed = paperdaily.run_daily(
+        TODAY, TODAY_QUOTE, dry_run=False, claim_owner=True
+    )
+    check(
+        "--claim-owner 可以把帳本接手過來",
+        claimed is not None and "skipped" not in claimed,
+        str(claimed),
+    )
+    check(
+        "接手之後 owner 換成這台機器",
+        paper.load_state(1_000_000.0).owner == paperdaily.this_machine(),
+        paper.load_state(1_000_000.0).owner,
+    )
+
+    # dry-run 不該把擁有權寫進去——它的用途是「先看看會發生什麼」。
+    reset_state()
+    peek = paper.load_state(1_000_000.0)
+    peek.owner = "另一台機器"
+    paper.save_state(peek)
+    paperdaily.run_daily(TODAY, TODAY_QUOTE, dry_run=True)
+    check(
+        "dry-run 不會改動狀態檔裡的 owner",
+        paper.load_state(1_000_000.0).owner == "另一台機器",
+        paper.load_state(1_000_000.0).owner,
+    )
+
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

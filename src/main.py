@@ -126,6 +126,11 @@ def main() -> int:
         action="store_true",
         help="排程斷線後補跑：把漏掉的交易日逐日推進，而不是直接跳到今天",
     )
+    parser.add_argument(
+        "--claim-owner",
+        action="store_true",
+        help="把模擬倉帳本的擁有權轉到這台機器（決策機換人時才用，先 git pull）",
+    )
     args = parser.parse_args()
 
     generated_at = datetime.now()
@@ -160,7 +165,11 @@ def main() -> int:
     if not args.no_paper:
         try:
             paper_data = paperdaily.run_daily(
-                trade_date, quotes, args.dry_run, catch_up=args.catch_up
+                trade_date,
+                quotes,
+                args.dry_run,
+                catch_up=args.catch_up,
+                claim_owner=args.claim_owner,
             )
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"程式交易引擎執行失敗：{exc}")

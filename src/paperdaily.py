@@ -25,6 +25,7 @@ main.py 每天抓完收盤行情之後呼叫 run_daily()，它負責:
 
 from __future__ import annotations
 
+import socket
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -115,6 +116,19 @@ def _log_run(record: dict, dry_run: bool) -> None:
         pass   # 稽核紀錄寫不進去，不該讓整份日報產不出來
 
 
+def this_machine() -> str:
+    """這台機器的識別字串，寫進狀態檔當「這本帳是誰的」。
+
+    用主機名而不是 UUID，是因為錯誤訊息要能讓人一眼認出是哪台
+    （「這本帳屬於 MacBook-Air」比一串亂碼有用得多）。
+    """
+    try:
+        name = socket.gethostname().strip()
+    except OSError:
+        name = ""
+    return name or "unknown-host"
+
+
 def _missing_trading_days(
     universe: dict[str, Series], last_date: str, trade_date: str
 ) -> list[str]:
@@ -139,11 +153,15 @@ def run_daily(
     quotes: dict[str, Quote],
     dry_run: bool = False,
     catch_up: bool = False,
+    claim_owner: bool = False,
 ) -> dict | None:
     """跑一天的模擬倉。回傳給報告用的 dict；未啟用時回傳 None。
 
     catch_up=True 時，會把 last_date 到 trade_date 之間漏掉的交易日
     依序補跑完再跑今天；預設 False，遇到缺口直接拒絕執行（見下面說明）。
+
+    claim_owner=True 時，把這本帳的擁有權轉移到這台機器上。
+    只有在你確定「決策機換人了」的時候才該用——見下面的擁有權保護。
     """
     config = load_config()
     if not is_enabled(config):
@@ -154,6 +172,48 @@ def run_daily(
     params = StrategyParams.from_dict(config.get("strategy"))
 
     account = paper.load_state(account_params.initial_cash)
+
+    # --- 擁有權保護（跨機器） ---
+    # data/paper_state.json 在版控裡，而它是一本每天都會變的機器產出帳本。
+    # 兩台機器各自跑排程時，git 幫不上任何忙：它要嘛把兩份 JSON 當文字合併，
+    # 要嘛讓後 pull 的那邊直接覆蓋掉——兩種結果都不會報錯。
+    #
+    # 實際發生過（2026-08）：origin/main 的 2881 記成 8/28 @ 141.141
+    # （用的是 8/21 的訊號內容，因為那台機器跳過了 8/22~8/27），
+    # 而另一台機器的同一筆是 8/24 @ 135.135。兩本帳、兩個成本、
+    # 兩條淨值曲線，畫面上都正常，差 4.5% 的價格沒有任何地方看得出來。
+    #
+    # 「只能有一台機器跑排程」這條規則原本只寫在 docs/HANDOFF.md 裡。
+    # 寫在文件裡的規則擋不住排程——所以改成程式自己檢查，
+    # 而且比照 data_guard 與缺口保護：不成交、不寫 last_date、不記淨值。
+    owner = this_machine()
+    if account.owner and account.owner != owner and not claim_owner:
+        message = (
+            f"⚠️ **今天不算數**：這本模擬倉帳是 **{account.owner}** 在寫的，"
+            f"但現在跑的是 **{owner}**。\n"
+            "> \n"
+            "> 兩台機器各自成交會產生兩本對不起來的帳（不同成本、不同持股、"
+            "不同淨值），而且 git 合併時不會報錯，只會安靜地留下一本。"
+            "**所以這一天沒有被記錄下來。**\n"
+            "> \n"
+            f"> 如果決策機真的要換成 {owner}：先確認已經 "
+            "`git pull` 到最新的帳本，再跑一次 "
+            "`python3 src/main.py --claim-owner` 接手。\n"
+            f"> 如果決策機還是 {account.owner}：這台只要 `git pull` 看結果，"
+            "把每日排程移除（Windows 用 "
+            "`launch\\win\\install_daily.ps1 -Uninstall`，"
+            "macOS 用 `bash launch/install_daily.sh --uninstall`）。"
+        )
+        _log_run(
+            {
+                "trade_date": trade_date,
+                "status": "owner_mismatch",
+                "state_owner": account.owner,
+                "this_machine": owner,
+            },
+            dry_run,
+        )
+        return {"skipped": message, "owner_mismatch": True}
 
     # 追蹤池 = 設定裡的持股+觀察清單，「加上」模擬倉現在還抱著的代號。
     #
@@ -310,6 +370,9 @@ def run_daily(
     # 各自記淨值，中間那些天的委託才會用它們自己的開盤價。
     dates_to_run = (missing if catch_up else []) + [trade_date]
     result = None
+    # 蓋上「這本帳是誰寫的」。第一次跑（owner 空的）等於自動認領，
+    # 之後別台機器再跑就會被上面的擁有權保護擋下來。
+    account.owner = owner
     for run_date in dates_to_run:
         day_before = len(account.trades)
         result = paper.run_day(
