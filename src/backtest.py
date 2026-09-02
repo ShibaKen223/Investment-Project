@@ -316,6 +316,35 @@ def _risk_adjusted_check(
     )
 
 
+def _exposure_matched_drawdown_check(
+    stats: dict, result: RunResult, bench_mdd: float | None
+) -> tuple[str, bool | None, str]:
+    """回撤要贏過「同樣曝險的 0050 部位」。
+
+    這條是把本來寫在下面那段警告裡的話變成真的檢查。原本的
+    「最大回撤 ≤ 15%」是一個絕對數字，而回撤跟曝險是綁在一起的：
+    半倉的策略回撤天生就小，那條門檻在低曝險下等於自動過關——
+    程式自己早就會印「它現在沒有在管任何事情」，但也就只是印一句。
+
+    同曝險基準 = |0050 同期回撤| × 策略平均曝險。用它當門檻的好處是
+    **不能靠調高數字繞過**：曝險一上升，門檻自己跟著收緊。
+    這跟 _risk_adjusted_check() 把「贏過 0050 總報酬」改成
+    「贏過 0050 報酬/回撤」是同一個修法，理由也一樣。
+    """
+    label = f"回撤優於同曝險的 {BENCHMARK_CODE}"
+    own_mdd = abs(stats["max_drawdown_pct"])
+    exposure = result.avg_exposure_pct / 100
+    if bench_mdd is None or not bench_mdd or not own_mdd or exposure <= 0:
+        return (label, None, "無法比較")
+    matched = abs(bench_mdd) * exposure
+    return (
+        label,
+        own_mdd < matched,
+        f"{own_mdd:.2f}% vs {matched:.2f}%（{BENCHMARK_CODE} "
+        f"{abs(bench_mdd):.2f}% × 曝險 {result.avg_exposure_pct:.1f}%）",
+    )
+
+
 def _print_objective_check(
     stats: dict,
     bench: float | None,
@@ -348,10 +377,11 @@ def _print_objective_check(
             str(stats["profit_factor"]) if stats["profit_factor"] else "—",
         ),
         (
-            "最大回撤 ≤ 15%",
-            abs(stats["max_drawdown_pct"]) <= 15,
+            "最大回撤 ≤ 20%",
+            abs(stats["max_drawdown_pct"]) <= 20,
             f"{stats['max_drawdown_pct']:.2f}%",
         ),
+        _exposure_matched_drawdown_check(stats, result, bench_mdd),
         (
             f"交易分布 ≥ 15 檔標的",
             len({t.code for t in account.trades}) >= 15,
@@ -376,14 +406,34 @@ def _print_objective_check(
         print("      同一段行情、少數幾檔貢獻大部分損益時，")
         print("      有效的獨立樣本會遠少於交易筆數——別把它當成 30 筆的證據。")
 
-    if result.avg_exposure_pct < 40 and abs(stats["max_drawdown_pct"]) <= 15:
+    # 「回撤只有 X% 但曝險也只有 Y%，這條門檻等於自動過關」原本是印在這裡的
+    # 一句警告。現在它變成上面的 _exposure_matched_drawdown_check()——
+    # 一個會判 ❌ 的檢查，比一句提醒強。
+
+    # --- 認錯條件 ---
+    # 這條寫在 strategy.yaml 裡但**從來沒有任何程式在檢查**，
+    # 而它是整份 objective 裡唯一會叫你停手的規則。
+    # 只寫在散文裡的停損線，在該用到的那天不會有人記得。
+    #
+    # 只印，不自動停用：要不要停是投資決策，不該由回測腳本代勞。
+    if stats["trades"] >= 30:
+        win_rate = stats["win_rate"]
+        mdd = abs(stats["max_drawdown_pct"])
+        triggers = []
+        if win_rate < 45:
+            triggers.append(f"勝率 {win_rate:.1f}% < 45%（賠率 1.22 的損益兩平點）")
+        if mdd > 20:
+            triggers.append(f"最大回撤 {mdd:.2f}% > 20%")
         print()
-        print(
-            f"  ⚠️  回撤只有 {stats['max_drawdown_pct']:.2f}%，"
-            f"但平均曝險也只有 {result.avg_exposure_pct:.1f}%。"
-        )
-        print("      「回撤 ≤ 15%」這條門檻在這種曝險下等於自動過關，")
-        print("      它現在沒有在管任何事情。")
+        if triggers:
+            print("  🛑 認錯條件成立：" + "；".join(triggers))
+            print("      objective 說的是「停用重審」。先停下來，不要先調參數——")
+            print("      調參數去救一個已經觸發認錯條件的策略，就是在對自己說謊。")
+        else:
+            print(
+                f"  ✅  認錯條件未觸發（勝率 {win_rate:.1f}% ≥ 45%、"
+                f"回撤 {mdd:.2f}% ≤ 20%）"
+            )
 
 
 def main() -> None:

@@ -282,6 +282,68 @@ print(f"（參考：ATR 模式完成 {atr_stats['trades']} 筆，"
       f"{stats['total_return_pct']:+.2f}% / {stats['max_drawdown_pct']:.2f}%）")
 print("  ⚠️ 兩者都是隨機漫步的假資料，不代表哪一種比較好。")
 
+# ==========================================================================
+print()
+print("--- 同曝險回撤門檻 ---")
+# ==========================================================================
+# 這條門檻取代了原本的「最大回撤 ≤ 15%」絕對數字。
+# 它存在的唯一理由是「絕對數字在低曝險下等於自動過關」，
+# 所以最重要的測試是**它真的會判失敗**——一個永遠 ✅ 的檢查
+# 跟沒有檢查是同一件事。
+
+
+def _fake_result(exposure_pct: float) -> backtest.RunResult:
+    r = backtest.RunResult(account=Account(cash=0.0))
+    r.exposures = [exposure_pct / 100]
+    return r
+
+
+# 0050 同期回撤 27.48%。曝險 65.3% → 同曝險基準 17.94%。
+_, passed, detail = backtest._exposure_matched_drawdown_check(
+    {"max_drawdown_pct": -15.76}, _fake_result(65.3), -27.48
+)
+check("回撤 15.76% 在 65.3% 曝險下通過（基準 17.94%）", passed is True, detail)
+
+_, passed, detail = backtest._exposure_matched_drawdown_check(
+    {"max_drawdown_pct": -19.0}, _fake_result(65.3), -27.48
+)
+check("同樣曝險下回撤 19% 要判失敗", passed is False, detail)
+
+# 這是整條門檻的重點：低曝險時它會收緊，不會自動過關。
+# 回撤 12% 在絕對門檻（20%）下輕鬆過關，但曝險只有 30% 時
+# 同曝險基準是 8.24%，該判失敗。
+_, passed, detail = backtest._exposure_matched_drawdown_check(
+    {"max_drawdown_pct": -12.0}, _fake_result(30.0), -27.48
+)
+check(
+    "低曝險不會自動過關：回撤 12% / 曝險 30% 要判失敗（絕對門檻卻會放行）",
+    passed is False,
+    detail,
+)
+check(
+    "同一組數字在絕對門檻 20% 下確實會過關（證明兩條門檻不是重複的）",
+    abs(-12.0) <= 20,
+)
+
+# 曝險升高時門檻自己放寬，所以不能靠「把錢投出去」來繞過——
+# 也不能靠「縮手」來假裝風險低。
+_, tight, _ = backtest._exposure_matched_drawdown_check(
+    {"max_drawdown_pct": -10.0}, _fake_result(30.0), -27.48
+)
+_, loose, _ = backtest._exposure_matched_drawdown_check(
+    {"max_drawdown_pct": -10.0}, _fake_result(90.0), -27.48
+)
+check(
+    "同一個回撤，曝險越低越難通過（門檻會跟著曝險收緊）",
+    tight is False and loose is True,
+    f"曝險30%={tight} 曝險90%={loose}",
+)
+
+_, passed, detail = backtest._exposure_matched_drawdown_check(
+    {"max_drawdown_pct": -15.0}, _fake_result(0.0), -27.48
+)
+check("完全空手時無法比較，回傳 None 而不是假裝通過", passed is None, detail)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} 項失敗 ❌")
