@@ -9,7 +9,22 @@
    收盤價是你做決定當下才知道的數字，用它下單等於偷看未來。
 2. 交易成本照台股實況計算：買賣各一次手續費 0.1425%（可設折扣、有最低 20 元），
    賣出再課 0.3% 證交稅。來回大約吃掉 0.47%。
-3. 只能買整張（1000 股）。零股的流動性和成本結構不一樣，不混在一起模擬。
+3. 交易單位由 account.trade_unit 決定（預設 1000 股＝整張，設 1 開放零股）。
+
+   ⚠️ 零股不是「放寬限制」，是**修掉一個讓回測失真的缺陷**。
+   本金 100 萬、每檔 20%＝預算 20 萬，但只能買整張時，觀察清單 54 檔裡
+   有 30 檔一張就超過 20 萬（2330 一張 244 萬、6669 一張 780 萬），
+   訊號成立也永遠買不到。實際成交的只剩金控、航運、塑化、電信——
+   選股論述寫的是 AI 供應鏈，回測測的根本是另一個標的池。
+
+   而且它會隨股價自己惡化：65 萬淨利裡有 41.6 萬（64%）來自
+   1303、2408、3711、2317、6213、3037 這幾檔，它們都是**買進時買得起、
+   現在已經買不起**的。只留今天買得起的 24 檔重跑，報酬從 65.51%
+   掉到 14.74%、報酬/回撤 1.70 輸給基準。贏家漲到買不起了。
+
+   零股讓「20% 部位」這個設定真的能被執行：7580 元的股票買 26 股
+   ≈ 19.7 萬，正好是本來就打算投的金額。部位大小沒有變大或變小，
+   只是從「0 或 758 萬」變成「拿得到 20 萬」。
 
 檔案:
     data/paper_state.json    當前現金、持股、待執行委託（會覆寫）
@@ -94,6 +109,18 @@ class AccountParams:
     initial_cash: float = 1_000_000.0
     position_pct: float = 20.0   # 每檔投入淨值的百分比
     max_positions: int = 5       # 同時最多幾檔
+
+    # 最小交易單位（股）。1000 = 只能買整張；1 = 開放零股。
+    # 預設留 1000 是為了讓既有測試與舊設定檔的行為不變，
+    # 真正在跑的設定見 config/paper.yaml。
+    trade_unit: int = 1000
+
+    # 低於這個金額就不開新部位（0 = 不檢查）。
+    # 零股讓「買 1 股」變成可能，而手續費有 20 元的最低收費：
+    # 2000 元的部位來回要付 20+20+6 = 46 元 ＝ 2.3%，
+    # 對一套停損 8%、停利 15% 的策略來說，那筆交易從第一天就輸了。
+    # 這道門檻擋的是「現金快用完時硬擠出一筆零頭部位」。
+    min_position_value: float = 0.0
 
     @classmethod
     def from_dict(cls, raw: dict | None) -> "AccountParams":
@@ -245,13 +272,55 @@ class Account:
 # --------------------------------------------------------------------------
 
 
-def _lots_affordable(cash: float, price: float, target_value: float) -> int:
-    """在「不超過目標金額」且「現金付得起」之下，最多能買幾股（整張）。"""
-    if price <= 0:
+def _shares_affordable(
+    cash: float, price: float, target_value: float, trade_unit: int = LOT_SIZE
+) -> int:
+    """在「不超過目標金額」且「現金付得起」之下，最多能買幾股。
+
+    trade_unit 是最小交易單位：1000 = 只能買整張，1 = 零股。
+    無條件捨去到 trade_unit 的整數倍。
+    """
+    if price <= 0 or trade_unit < 1:
         return 0
     budget = min(cash, target_value)
-    lots = int(budget // (price * LOT_SIZE))
-    return max(lots, 0) * LOT_SIZE
+    units = int(budget // (price * trade_unit))
+    return max(units, 0) * trade_unit
+
+
+def _why_unaffordable(
+    price: float, cash: float, target_value: float, trade_unit: int,
+    min_position_value: float,
+) -> str:
+    """買不到時，說出**真正**卡住的是哪一個限制。
+
+    舊版本這裡一律印「資金不足（可用 X 元）」，而 X 印的是現金。
+    但 _shares_affordable 取的是 min(現金, 部位上限)，所以最常見的情況
+    其實是「現金很多，但一個單位就超過 20% 的部位上限」——
+    畫面照樣說「資金不足，可用 858,739 元」，看的人會以為要再等錢進來，
+    實際上再多的錢也買不到，該調的是 position_pct 或 trade_unit。
+    """
+    unit_cost = price * trade_unit
+    unit_label = f"{trade_unit:,} 股" if trade_unit != LOT_SIZE else "1 張"
+    if unit_cost > target_value and unit_cost > cash:
+        return (
+            f"最小交易單位（{unit_label}）約 {unit_cost:,.0f} 元，"
+            f"同時超過部位上限 {target_value:,.0f} 元與可用現金 {cash:,.0f} 元"
+        )
+    if unit_cost > target_value:
+        return (
+            f"最小交易單位（{unit_label}）約 {unit_cost:,.0f} 元，"
+            f"超過每檔部位上限 {target_value:,.0f} 元"
+            f"（現金有 {cash:,.0f} 元，卡住的不是現金）"
+        )
+    if unit_cost > cash:
+        return (
+            f"現金只剩 {cash:,.0f} 元，不足以買進最小交易單位"
+            f"（{unit_label}，約 {unit_cost:,.0f} 元）"
+        )
+    return (
+        f"買得到的金額低於最小部位門檻 {min_position_value:,.0f} 元，"
+        f"這種零頭部位光手續費就吃掉報酬"
+    )
 
 
 def execute_pending(
@@ -259,6 +328,7 @@ def execute_pending(
     trade_date: str,
     opens: dict[str, float],
     costs: Costs,
+    trade_unit: int = LOT_SIZE,
 ) -> list[dict]:
     """用今天的開盤價執行昨天決定的委託。回傳成交明細（給報告用）。
 
@@ -281,7 +351,9 @@ def execute_pending(
             continue
 
         if order.side == "BUY":
-            fills.append(_fill_buy(account, order, trade_date, open_price, costs))
+            fills.append(
+                _fill_buy(account, order, trade_date, open_price, costs, trade_unit)
+            )
         else:
             fills.append(_fill_sell(account, order, trade_date, open_price, costs))
 
@@ -290,7 +362,8 @@ def execute_pending(
 
 
 def _fill_buy(
-    account: Account, order: Order, trade_date: str, open_price: float, costs: Costs
+    account: Account, order: Order, trade_date: str, open_price: float, costs: Costs,
+    trade_unit: int = LOT_SIZE,
 ) -> dict:
     if order.code in account.positions:
         return {
@@ -301,13 +374,20 @@ def _fill_buy(
         }
 
     price = costs.buy_price(open_price)
-    shares = min(order.shares, _lots_affordable(account.cash, price, account.cash))
-    if shares < LOT_SIZE:
+    shares = min(
+        order.shares,
+        _shares_affordable(account.cash, price, account.cash, trade_unit),
+    )
+    if shares < trade_unit:
+        unit_label = f"{trade_unit:,} 股" if trade_unit != LOT_SIZE else "1 張"
         return {
             "code": order.code,
             "side": "BUY",
             "status": "REJECTED",
-            "detail": f"現金 {account.cash:,.0f} 不足以買進 1 張（每股 {price:.2f}）",
+            "detail": (
+                f"現金 {account.cash:,.0f} 不足以買進最小交易單位"
+                f"（{unit_label}，每股 {price:.2f}）"
+            ),
         }
 
     amount = price * shares
@@ -470,7 +550,9 @@ def run_day(
         for code, series in universe.items()
         if (bar := series.bar_on(trade_date)) is not None
     }
-    result.fills = execute_pending(account, trade_date, opens, costs)
+    result.fills = execute_pending(
+        account, trade_date, opens, costs, account_params.trade_unit
+    )
 
     # --- 2. 更新持股狀態（今天有交易的才算一根） ---
     closes: dict[str, float] = {}
@@ -557,14 +639,24 @@ def run_day(
         bar = series.bar_on(trade_date)
         if bar is None:
             continue
-        est_price = costs.buy_price(bar.close)   # 用收盤價估算張數，實際以明開成交
-        shares = _lots_affordable(projected_cash, est_price, target_value)
-        if shares < LOT_SIZE:
+        est_price = costs.buy_price(bar.close)   # 用收盤價估算股數，實際以明開成交
+        unit = account_params.trade_unit
+        shares = _shares_affordable(projected_cash, est_price, target_value, unit)
+
+        # 零頭部位擋在這裡，不是擋在成交那一層——現在拒絕還能把名額
+        # 留給下一檔，等到明天開盤才發現就只是白白空一天。
+        if shares >= unit and est_price * shares < account_params.min_position_value:
+            shares = 0
+
+        if shares < unit:
             result.rejected.append(
                 {
                     "code": code,
-                    "reason": f"訊號成立但資金不足（每張約 "
-                    f"{est_price * LOT_SIZE:,.0f} 元，可用 {projected_cash:,.0f} 元）",
+                    "reason": "訊號成立但買不到："
+                    + _why_unaffordable(
+                        est_price, projected_cash, target_value, unit,
+                        account_params.min_position_value,
+                    ),
                 }
             )
             continue

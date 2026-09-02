@@ -390,6 +390,78 @@ check(
     str(rej),
 )
 
+# --- 零股 ---
+# 整張模式下 20 萬預算買不到一張 7580 元的股票（一張 758 萬）；
+# 開放零股之後同一筆預算要能買到 26 股 ≈ 19.7 萬。
+check(
+    "整張模式：一張超過預算就是 0 股",
+    paper._shares_affordable(1_000_000, 7580.0, 200_000, 1000) == 0,
+    str(paper._shares_affordable(1_000_000, 7580.0, 200_000, 1000)),
+)
+check(
+    "零股模式：同一筆預算買得到 26 股",
+    paper._shares_affordable(1_000_000, 7580.0, 200_000, 1) == 26,
+    str(paper._shares_affordable(1_000_000, 7580.0, 200_000, 1)),
+)
+check(
+    "零股買到的金額不超過部位上限",
+    paper._shares_affordable(1_000_000, 7580.0, 200_000, 1) * 7580.0 <= 200_000,
+)
+check(
+    "零股仍受現金限制（現金 5 萬 → 買不到 26 股）",
+    paper._shares_affordable(50_000, 7580.0, 200_000, 1) == 6,
+    str(paper._shares_affordable(50_000, 7580.0, 200_000, 1)),
+)
+
+odd_lot = Account(cash=1_000_000.0)
+odd_lot.pending = [Order(code="TEST", side="BUY", shares=26, decided_on="d")]
+paper.execute_pending(odd_lot, "2026-01-02", {"TEST": 7580.0}, costs, 1)
+check(
+    "零股委託會真的成交，不再被退單",
+    odd_lot.positions.get("TEST") is not None
+    and odd_lot.positions["TEST"].shares == 26,
+    str(odd_lot.positions),
+)
+
+# 賣出零股部位：不能有「賣不掉的殭屍持股」。
+odd_sell = Account(cash=0.0)
+odd_sell.positions["TEST"] = paper.PaperPosition(
+    code="TEST", shares=26, entry_price=7580.0, entry_date="2026-01-02",
+    entry_fee=120.0, peak_close=7580.0, bars_held=5,
+)
+odd_sell.pending = [Order(code="TEST", side="SELL", shares=26,
+                          decided_on="d", reason=strategy.TAKE_PROFIT)]
+odd_fills = paper.execute_pending(odd_sell, "2026-01-10", {"TEST": 8000.0}, costs, 1)
+check(
+    "零股部位賣得掉，不會變成殭屍持股",
+    odd_fills[0]["status"] == "FILLED" and not odd_sell.positions,
+    str(odd_fills),
+)
+
+# 卡住的到底是現金還是部位上限——舊訊息一律說「資金不足（可用 X 元）」，
+# 而 X 印的是現金。最常見的情況其實是現金很多、但一張就超過 20% 上限，
+# 那句話會讓人以為再等錢進來就好，實際上再多的錢也買不到。
+# 500 元的股票：一張 50 萬 < 現金 85 萬，但 > 部位上限 20 萬。
+why_cap = paper._why_unaffordable(500.0, 858_739, 200_000, 1000, 0)
+check(
+    "買不起的理由要指出是部位上限，不是現金",
+    "部位上限" in why_cap and "卡住的不是現金" in why_cap,
+    why_cap,
+)
+# 2330 那種一張 244 萬的，現金與上限同時擋住，要兩個都講。
+why_both = paper._why_unaffordable(2440.0, 858_739, 200_000, 1000, 0)
+check(
+    "現金與上限同時不夠時，兩個都要講出來",
+    "部位上限" in why_both and "現金" in why_both,
+    why_both,
+)
+why_cash = paper._why_unaffordable(100.0, 50_000, 200_000, 1000, 0)
+check(
+    "真的是現金不夠時才說現金",
+    "現金只剩" in why_cash,
+    why_cash,
+)
+
 # 停牌 → 作廢不順延
 halted = Account(cash=1_000_000.0)
 halted.pending = [Order(code="TEST", side="BUY", shares=1000, decided_on="d")]
