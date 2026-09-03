@@ -112,11 +112,26 @@ class Action:
 # --------------------------------------------------------------------------
 
 
+# 解析結果的快取，key 是 (檔案路徑, mtime, 大小)。
+# load_actions() 會被 history.load_bars_adjusted() 每檔呼叫一次，
+# 而 load_bars_adjusted() 又被 research.build_view() 每檔呼叫一次——
+# 觀察清單 54 檔的話，開一次「研究」頁就會把這份 591 行的 YAML
+# 從頭解析 54 次。檔案沒變就重用，變了就自動重讀（不用手動清）。
+_ACTIONS_CACHE: dict[tuple, dict[str, list["Action"]]] = {}
+
+
 def load_actions(path: Path | None = None) -> dict[str, list[Action]]:
     """讀出所有已登記的公司行為，依代號分組、每組依日期排序。"""
     path = path or ACTIONS_FILE
     if not path.exists():
         return {}
+
+    stat = path.stat()
+    cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
+    cached = _ACTIONS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     with path.open(encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
 
@@ -144,6 +159,11 @@ def load_actions(path: Path | None = None) -> dict[str, list[Action]]:
             )
         if items:
             out[code] = sorted(items, key=lambda a: a.date)
+
+    # 只留最後一次的結果：這份檔案在一次執行裡不會有第二個版本，
+    # 留著舊 key 只是佔記憶體。
+    _ACTIONS_CACHE.clear()
+    _ACTIONS_CACHE[cache_key] = out
     return out
 
 

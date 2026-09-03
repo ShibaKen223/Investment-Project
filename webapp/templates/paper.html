@@ -29,6 +29,10 @@
 </div>
 {% else %}
 
+{% if quote_warning %}
+  <div class="warn-box">{{ quote_warning }}</div>
+{% endif %}
+
 <div class="card paper-intro">
   <h2>這頁怎麼用 <span class="pill auto">全自動</span></h2>
   <p style="margin:0 0 10px">

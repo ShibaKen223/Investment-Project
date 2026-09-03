@@ -54,12 +54,13 @@ python3 webapp/app.py                 # 開儀表板
 
 ---
 
-## 五個頁面
+## 六個頁面
 
 | 頁面 | 用途 |
 | --- | --- |
 | **今日** | 待辦訊號、投組總覽、持股明細、買進理由、觀察清單、決策紀錄 |
 | **研究** | 每檔的價格分析、產業背景、該去查什麼、名詞辭典 |
+| **模擬倉** | 虛擬帳戶自己的決策紀錄：成交、明日委託、淨值曲線、累計績效 |
 | **歷史** | 過去的決策紀錄與每日報告存檔、覆盤時該問的四個問題 |
 | **規則設定** | 停損停利 %、停損基準、我的目標、規則變更紀錄 |
 | **說明** | 使用說明與常見問題 —— **第一次用先看這頁** |
@@ -152,7 +153,7 @@ powershell -ExecutionPolicy Bypass -File launch\win\install_daily.ps1 -Uninstall
 
 ### 名詞辭典
 
-不熟 PCB、封裝、CoWoS、ABF 載板、本益比、除權息這些詞？辭典有 40 條，
+不熟 PCB、封裝、CoWoS、ABF 載板、本益比、除權息這些詞？辭典有 50 條，
 每一條都是「一句話講完 + 多一點背景 + 為什麼你會在新聞裡看到它」。
 
 研究頁下方可以直接搜尋，或用命令列：
@@ -168,8 +169,8 @@ python3 src/research.py --glossary       # 印出全部
 ### 知識庫在哪、怎麼改
 
 ```
-config/glossary.yaml   名詞辭典（40 條）
-config/sectors.yaml    產業地圖（26 檔）
+config/glossary.yaml   名詞辭典（50 條）
+config/sectors.yaml    產業地圖（57 檔）
 ```
 
 兩份都是人工維護的純文字檔，看得懂就改得動。
@@ -567,9 +568,14 @@ python3 src/history.py --self-test
   其餘邏輯不動——但那是完全不同的風險等級，先看幾個月模擬績效再說。
 - **研究筆記接上真實資訊源**：目前只有價格資料和人工整理的靜態背景，
   沒有新聞、財報、法說會、法人買賣。這是「為什麼漲」答不出來的原因。
-- **Windows / Linux**：桌面捷徑與每日排程都是 macOS 專用
-  （`.app` 與 LaunchAgent）。核心的 Python 程式本身跨平台，
-  但那兩塊要改寫。
+- **Linux**：桌面捷徑與每日排程只做了 macOS（`.app` 與 LaunchAgent）
+  與 Windows（`launch\win\` 與工作排程器）兩套。核心的 Python 程式本身
+  跨平台，但捷徑與排程那兩塊要另外寫。
+- **`src/fills.py`（真實成交回報）還沒接進主流程**：它能把券商匯出的
+  `data/fills.csv` 重播成持股，但 `main.py` / `report.py` 目前只認
+  `monitor.py` 的 manual / engine / both 三種來源。
+  `config/strategy.yaml` 的 `mode: auto` 也還沒有任何程式碼在讀它，
+  改成 `auto` 不會報錯、也不會改變任何行為。細節見 `docs/HANDOFF.md`。
 
 ---
 

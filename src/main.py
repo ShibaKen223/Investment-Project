@@ -121,6 +121,16 @@ def main() -> int:
     parser.add_argument(
         "--no-paper", action="store_true", help="跳過模擬倉（只做持股監控）"
     )
+    parser.add_argument(
+        "--catch-up",
+        action="store_true",
+        help="排程斷線後補跑：把漏掉的交易日逐日推進，而不是直接跳到今天",
+    )
+    parser.add_argument(
+        "--claim-owner",
+        action="store_true",
+        help="把模擬倉帳本的擁有權轉到這台機器（決策機換人時才用，先 git pull）",
+    )
     args = parser.parse_args()
 
     generated_at = datetime.now()
@@ -130,12 +140,7 @@ def main() -> int:
     positions_cfg = load_yaml(CONFIG_DIR / "positions.yaml")
 
     rules_cfg = strategy.get("rules") or {}
-    base_rules = Rules(
-        stop_loss_pct=float(rules_cfg.get("stop_loss_pct", 10.0)),
-        take_profit_pct=float(rules_cfg.get("take_profit_pct", 22.0)),
-        stop_basis=str(rules_cfg.get("stop_basis", "cost")),
-        near_threshold_pct=float(rules_cfg.get("near_threshold_pct", 3.0)),
-    )
+    base_rules = Rules.from_config(rules_cfg)
     overrides = strategy.get("overrides") or {}
     overrides = {str(k): v for k, v in overrides.items() if v}
     objective = str(strategy.get("objective", "（尚未設定目標）"))
@@ -159,7 +164,13 @@ def main() -> int:
     paper_data = None
     if not args.no_paper:
         try:
-            paper_data = paperdaily.run_daily(trade_date, quotes, args.dry_run)
+            paper_data = paperdaily.run_daily(
+                trade_date,
+                quotes,
+                args.dry_run,
+                catch_up=args.catch_up,
+                claim_owner=args.claim_owner,
+            )
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"程式交易引擎執行失敗：{exc}")
 

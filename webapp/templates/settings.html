@@ -5,6 +5,7 @@
 <div class="card">
   <h2>我的目標 <span class="hint">會顯示在儀表板最上面</span></h2>
   <form method="post" action="{{ url_for('settings_objective') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <div class="field">
       <textarea name="objective" rows="2"
         placeholder="例：未來 12 個月產生 NT$X 可支配現金，且整體最大回撤不超過 15%。">{{ objective }}</textarea>
@@ -20,6 +21,7 @@
   <h2>交易規則 <span class="hint">這裡就是「寫死在系統裡的紀律」</span></h2>
 
   <form method="post" action="{{ url_for('settings_rules') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <div class="grid c4">
       <div class="field">
         <label>停損 %（跌破成本這麼多就出場）</label>

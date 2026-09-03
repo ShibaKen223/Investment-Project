@@ -101,6 +101,27 @@ class Rules:
     stop_basis: str = "cost"      # "cost" | "trailing"
     near_threshold_pct: float = 3.0
 
+    @classmethod
+    def from_config(cls, cfg: dict | None) -> "Rules":
+        """從 strategy.yaml 的 rules 區塊建出 Rules。
+
+        之前 main.py 與 webapp/app.py 有三份一模一樣的建構程式碼，
+        而且各自把上面那四個預設值再寫死一次。改一邊忘了另一邊的話，
+        日報與儀表板會對同一檔股票畫出兩條不同的停損線——
+        而且兩邊看起來都很正常，沒有任何地方會報錯。
+        （同樣的教訓見 monitor.evaluate_all 的註解。）
+        """
+        cfg = cfg or {}
+        d = cls()
+        return cls(
+            stop_loss_pct=float(cfg.get("stop_loss_pct", d.stop_loss_pct)),
+            take_profit_pct=float(cfg.get("take_profit_pct", d.take_profit_pct)),
+            stop_basis=str(cfg.get("stop_basis", d.stop_basis)),
+            near_threshold_pct=float(
+                cfg.get("near_threshold_pct", d.near_threshold_pct)
+            ),
+        )
+
 
 @dataclass
 class Evaluation:
