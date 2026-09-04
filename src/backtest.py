@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -191,6 +191,7 @@ def print_report(
     result: RunResult,
     account_params: AccountParams,
     params: StrategyParams,
+    override_note: str = "",
 ) -> None:
     account, curve, curve_dates = result.account, result.curve, result.curve_dates
     stats = paper.performance(account.trades, curve, account_params.initial_cash)
@@ -199,6 +200,11 @@ def print_report(
     print("=" * 62)
     print("模擬倉回測結果")
     print("=" * 62)
+    # 覆寫過就要講出來。沒有這一行的話，掃描出來的數字跟正式設定的回測
+    # 長得一模一樣，貼進 changelog 的時候沒有人分得出來哪張表是哪個配置。
+    if override_note:
+        print(f"⚠  本次覆寫：{override_note}（config/paper.yaml 未變動）")
+        print("-" * 62)
     if curve_dates:
         print(f"期間          {curve_dates[0]} ~ {curve_dates[-1]}"
               f"（{len(curve_dates)} 個交易日）")
@@ -442,9 +448,54 @@ def main() -> None:
     parser.add_argument("--from", dest="start", help="起始日 YYYY-MM-DD")
     parser.add_argument("--to", dest="end", help="結束日 YYYY-MM-DD")
     parser.add_argument("--verbose", action="store_true", help="印出每一筆成交")
+
+    # 這兩個旗標只覆寫「這一次執行」，不寫回 config/paper.yaml。
+    # 想比較「5 檔 × 20%」和「10 檔 × 10%」哪個好，本來得改設定檔才測得到，
+    # 而那份設定檔正在跑真的模擬倉——為了跑一次比較去動它，
+    # 等於拿正在累積樣本的帳本當實驗場。
+    #
+    # ⚠ 兩個要一起給。max_positions × position_pct 是總曝險上限：
+    #    只把檔數 5 → 10、卻留著 20%，是 200% 的槓桿，這套系統做不到，
+    #    實際跑出來會變成「前 5 檔吃光現金、後 5 檔全部買不到」，
+    #    那張表看起來像 10 檔的結果，其實還是 5 檔。
+    parser.add_argument(
+        "--max-positions", type=int, metavar="N",
+        help="覆寫同時持有檔數上限（需與 --position-pct 一起給）",
+    )
+    parser.add_argument(
+        "--position-pct", type=float, metavar="P",
+        help="覆寫每檔投入淨值的百分比（需與 --max-positions 一起給）",
+    )
     args = parser.parse_args()
 
+    if (args.max_positions is None) != (args.position_pct is None):
+        raise SystemExit(
+            "--max-positions 和 --position-pct 要一起給。\n"
+            "只改其中一個會讓總曝險上限（檔數 × 每檔 %）悄悄變成別的數字，\n"
+            "跑出來的表就不是你以為的那個配置。"
+        )
+
     account_params, costs, params, _ = load_config()
+
+    override_note = ""
+    if args.max_positions is not None:
+        if args.max_positions < 1:
+            raise SystemExit("--max-positions 至少要 1")
+        if args.position_pct <= 0:
+            raise SystemExit("--position-pct 要大於 0")
+        account_params = replace(
+            account_params,
+            max_positions=args.max_positions,
+            position_pct=args.position_pct,
+        )
+        total = args.max_positions * args.position_pct
+        override_note = (
+            f"{args.max_positions} 檔 × {args.position_pct:g}%"
+            f" ＝ 曝險上限 {total:g}%"
+        )
+        if total > 100:
+            override_note += "（>100%，會有部位買不到）"
+
     codes = (
         [c.strip() for c in args.codes.split(",") if c.strip()]
         if args.codes
@@ -461,7 +512,7 @@ def main() -> None:
         universe, account_params, costs, params,
         start=args.start, end=args.end, verbose=args.verbose,
     )
-    print_report(result, account_params, params)
+    print_report(result, account_params, params, override_note=override_note)
 
 
 if __name__ == "__main__":
