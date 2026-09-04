@@ -39,6 +39,14 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Windows 的主控台預設是 GBK/cp950，而這支程式的輸出全是中文，還帶著
+# ⚠ 🔴 之類的符號——不改編碼的話，一遇到 GBK 放不進去的字元就直接
+# UnicodeEncodeError 中斷，報告只印出前面半段。tests/ 底下每一支都做了
+# 同樣的事（見 commit 00c43f2），但正式的進入點當時漏掉了。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 import history  # noqa: E402
 from history import Bar  # noqa: E402
 from strategy import atr as compute_atr  # noqa: E402

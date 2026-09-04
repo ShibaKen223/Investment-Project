@@ -38,6 +38,14 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Windows 的主控台預設是 GBK/cp950，而這支程式的輸出全是中文，還帶著
+# ⚠ 🔴 之類的符號——不改編碼的話，一遇到 GBK 放不進去的字元就直接
+# UnicodeEncodeError 中斷，報告只印出前面半段。tests/ 底下每一支都做了
+# 同樣的事（見 commit 00c43f2），但正式的進入點當時漏掉了。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 ROOT = Path(__file__).resolve().parent.parent
 HISTORY_DIR = ROOT / "data" / "history"
 RAW_DIR = ROOT / "data" / "raw"
@@ -148,13 +156,58 @@ class Bar:
 # 解法分兩層：原子寫入解決第 1 種，檔案鎖解決第 2 種。
 
 try:
-    import fcntl
-except ImportError:      # Windows 沒有 fcntl
+    import fcntl          # POSIX
+except ImportError:
     fcntl = None         # type: ignore[assignment]
+
+try:
+    import msvcrt         # Windows
+except ImportError:
+    msvcrt = None        # type: ignore[assignment]
 
 # 同一個行程內的執行緒用這把鎖。寫檔只有幾毫秒、抓資料要好幾秒，
 # 所以用一把全域鎖就夠，不值得為了每檔一把鎖增加複雜度。
 _write_lock = threading.Lock()
+
+# 等不到鎖就放棄的上限。正常情況一次寫入只有幾毫秒，
+# 等超過這麼久代表對方卡住了，繼續等下去只是把問題藏起來。
+_LOCK_TIMEOUT = 60.0
+
+
+def _lock_handle(handle) -> None:
+    """把檔案鎖起來，等到拿到為止。"""
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return
+    # Windows：msvcrt.locking 鎖的是「從目前位置起算的 N 個位元組」，
+    # 所以先 seek(0) 再鎖第一個位元組——檔案是空的也沒關係，
+    # Windows 允許鎖 EOF 之後的範圍。
+    # 用 LK_NBLCK 自己輪詢而不是 LK_LOCK：後者固定重試 10 次、每次隔 1 秒，
+    # 然後就直接拋例外，中間完全沒得調。
+    deadline = time.monotonic() + _LOCK_TIMEOUT
+    handle.seek(0)
+    while True:
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"等了 {_LOCK_TIMEOUT:.0f} 秒還拿不到寫入鎖，"
+                    "可能有另一個回補行程卡住了。"
+                ) from None
+            time.sleep(0.05)
+
+
+def _unlock_handle(handle) -> None:
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        return
+    handle.seek(0)
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    except OSError:
+        pass                           # 關檔時作業系統也會放掉
 
 
 @contextlib.contextmanager
@@ -167,15 +220,17 @@ def _exclusive(code: str):
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     lock_file = HISTORY_DIR / f".{code}.lock"
     with _write_lock:
-        if fcntl is None:
-            yield                      # Windows：只有執行緒層級的保護
+        if fcntl is None and msvcrt is None:
+            yield                      # 兩個都沒有：只剩執行緒層級的保護
             return
-        with lock_file.open("w") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+        # 用 "a+" 而不是 "w"：後者會清空檔案，而清空的對象正是
+        # 另一個行程可能正鎖著的那個檔。
+        with lock_file.open("a+") as handle:
+            _lock_handle(handle)
             try:
                 yield
             finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+                _unlock_handle(handle)
 
 
 def _write_atomic(path: Path, rows: list[Bar]) -> None:
@@ -185,7 +240,10 @@ def _write_atomic(path: Path, rows: list[Bar]) -> None:
     要嘛看到新的完整檔案，不會看到寫到一半的狀態。
     寫的過程中當掉的話，原本的檔案也還在。
     """
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    # 暫存檔名帶上行程編號。共用一個 X.csv.tmp 的話，兩個行程會同時
+    # 寫進同一個檔，然後各自把它 replace 過去——第二個 replace 搬走的
+    # 是對方寫到一半的內容，而且完全不會報錯。
+    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
     with tmp.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
         writer.writeheader()
@@ -193,7 +251,18 @@ def _write_atomic(path: Path, rows: list[Bar]) -> None:
             writer.writerow(asdict(bar))
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, path)
+
+    # Windows 的 os.replace 在目標檔正被別人開著讀的時候會丟 PermissionError
+    # （POSIX 不會，那裡 rename 一律成功）。讀檔只有幾毫秒，等一下再試就好。
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05)
 
 
 def history_path(code: str) -> Path:

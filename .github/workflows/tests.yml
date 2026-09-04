@@ -1,0 +1,74 @@
+# 每次 push 與 PR 都跑一次測試。
+#
+# tests/run_all.py 本身寫得很完整，但它只有在有人記得跑的時候才會跑。
+# 這個專案的每一個 bug 都是沉默的——策略被改壞不會噴錯，回測照樣跑完、
+# 數字照樣印出來，只是那些決策是錯的。這種東西要靠自動化守，不能靠自律。
+name: tests
+
+# push 只看主線，分支上的驗證交給 pull_request。
+# 兩個都不限分支的話，同一個 commit 會跑兩輪一模一樣的測試——
+# 一次來自 push、一次來自 PR，浪費時間也讓 checks 清單變得難讀。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 是開發用的版本，3.12 是為了先看到相容性問題。
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 測試全部用合成資料，不連外網也不碰真的行情 API。
+      # 會連網的只有 datasource.py / history.py 的抓取函式，測試不呼叫它們。
+      - name: 跑測試
+        run: python3 tests/run_all.py --verbose
+
+  launcher-syntax:
+    # 每日排程的 .ps1 壞掉時，症狀是「排程安靜地什麼都沒做」——
+    # 那正是這個專案最不想要的失敗方式，而且 Python 測試碰不到它們。
+    # 至少先確保語法是對的。
+    name: PowerShell 語法檢查
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析 launch/win 底下所有 .ps1
+        shell: powershell
+        run: |
+          # 用 foreach 陳述式而不是 ForEach-Object：後者的 script block
+          # 是子範圍，$bad = 1 只會改到副本，退出碼永遠是 0——
+          # 又一個「安靜地不做事」。
+          $bad = 0
+          foreach ($f in (Get-ChildItem -Path launch/win -Filter *.ps1 -Recurse)) {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $f.FullName, [ref]$null, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              $bad = 1
+              Write-Host "FAIL $($f.Name)"
+              foreach ($e in $errors) {
+                Write-Host "  line $($e.Extent.StartLineNumber): $($e.Message)"
+              }
+            } else {
+              Write-Host "OK   $($f.Name)"
+            }
+          }
+          exit $bad

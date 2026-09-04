@@ -2,6 +2,9 @@
 
 只綁定 127.0.0.1，資料完全留在你的電腦上，不對外開放。
 
+但綁定本機只擋得住「別台機器連進來」。擋不住「你自己的瀏覽器被別的網站
+指使」——那要靠 _guard_request()，見下面那支的說明。
+
 啟動方式（一般使用者請雙擊桌面圖示，不需要跑這行）:
     python3 webapp/app.py
 """
@@ -9,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -16,12 +20,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+# Windows 的主控台預設是 GBK/cp950，而這支程式的輸出全是中文，還帶著
+# ⚠ 🔴 之類的符號——不改編碼的話，一遇到 GBK 放不進去的字元就直接
+# UnicodeEncodeError 中斷，報告只印出前面半段。tests/ 底下每一支都做了
+# 同樣的事（見 commit 00c43f2），但正式的進入點當時漏掉了。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 from flask import (  # noqa: E402
     Flask,
+    abort,
     flash,
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 
@@ -37,9 +51,75 @@ from portfolio import (  # noqa: E402
 )
 
 app = Flask(__name__)
-app.secret_key = "local-only-investment-dashboard"  # 僅供 flash 訊息，非安全用途
+
+# 只用來簽 session cookie（flash 訊息與下面的 CSRF token）。每次啟動重新生成:
+# 不需要跨重啟保存——重開儀表板本來就該重新開始——而寫死一組常數等於
+# 把簽章金鑰公開在版控裡，任何人都能自己偽造一個通得過驗證的 token。
+app.secret_key = secrets.token_hex(32)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # 跨站請求不帶 cookie（第一道）
+
 
 REPORT_DIR = ROOT / "data" / "reports"
+
+# 只接受從本機開的連線。IPv6 的 request.host 會是 "[::1]:5173"，
+# 所以比對前要先把 port 切掉。
+ALLOWED_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+
+
+# --------------------------------------------------------------------------
+# 跨站請求防護
+# --------------------------------------------------------------------------
+
+def csrf_token() -> str:
+    """這次 session 的表單驗證碼，樣板用 {{ csrf_token() }} 取。"""
+    token = session.get("_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf"] = token
+    return token
+
+
+@app.context_processor
+def _inject_csrf() -> dict:
+    return {"csrf_token": csrf_token}
+
+
+@app.before_request
+def _guard_request():
+    """擋掉來自其他網站的請求。
+
+    綁 127.0.0.1 只擋得住「別台機器連進來」，擋不住「你自己的瀏覽器被別的
+    網站指使」。使用者開著儀表板的時候逛到任何一個網頁，那個網頁都可以放一張
+    隱藏表單自動 POST 到 127.0.0.1:5173——關掉儀表板（/quit 直接 os._exit）、
+    塞一筆假持股進 positions.yaml、把觀察清單清空、改掉停損停利規則。
+    同源政策讓它讀不到回應，但這些全都是「寫」，它不需要讀。
+
+    兩道防線:
+      1. SameSite=Lax —— 跨站送過來的請求不帶 session cookie。
+      2. 表單驗證碼 —— cookie 沒帶到就沒有 token，比對必定失敗。
+         第 1 道靠瀏覽器，第 2 道靠我們自己，所以兩道都要有。
+
+    順便擋 DNS rebinding：Host 不是本機名稱就直接拒絕。
+    """
+    host = (request.host or "").rsplit(":", 1)[0]
+    if host not in ALLOWED_HOSTS:
+        abort(403, "這個儀表板只接受從本機（127.0.0.1）開啟。")
+
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+
+    expected = session.get("_csrf", "")
+    supplied = request.form.get("_csrf", "")
+    # expected 是空的時候也要擋。少了前半段，compare_digest("", "") 會回 True，
+    # 於是「沒有 session 的請求」反而全部通過——正好是要擋的那種。
+    if not expected or not secrets.compare_digest(supplied, expected):
+        abort(
+            400,
+            "表單驗證碼不符。請重新整理頁面再操作一次；"
+            "如果你沒有按下任何按鈕就看到這一頁，那是某個網站試圖從外部"
+            "操作你的儀表板，已經被擋下來了。",
+        )
+    return None
 
 
 def render_markdown(text: str) -> str | None:
@@ -143,12 +223,41 @@ def _sparkline_svg(points: list[dict], width: int = 640, height: int = 90, pad: 
     )
 
 
-# 每日排程（launch/install_daily.sh 裝的那個）。
+# 每日排程。兩個平台裝的東西不一樣，要各自去問各自的排程系統：
+#   macOS   launch/install_daily.sh   → LaunchAgent plist
+#   Windows launch/win/install_daily.ps1 → 工作排程器裡的一個工作
 SCHEDULE_PLIST = (
     Path.home() / "Library" / "LaunchAgents" / "local.investment.daily.plist"
 )
+SCHEDULE_TASK_NAME = "InvestmentDailyUpdate"
 # 幾天沒跑就算不正常。抓 4 天是為了容忍「週五跑完 → 週一才開機」再加一天連假。
 SCHEDULE_STALE_DAYS = 4
+
+
+def _schedule_installed() -> bool:
+    """排程裝了沒。問錯平台的話會永遠回答「沒裝」。
+
+    這個函式回傳 False 的代價是畫面上會跳一個「自動更新沒在跑」的橫幅。
+    橫幅本身是對的設計，但如果它在排程明明有裝的機器上天天出現，
+    使用者很快就會學會無視它——那等於把這個警告整個作廢掉。
+    """
+    if sys.platform == "win32":
+        try:
+            import subprocess
+
+            probe = subprocess.run(
+                ["schtasks", "/Query", "/TN", SCHEDULE_TASK_NAME],
+                capture_output=True,
+                # 排程器的輸出是本地編碼（cp950/GBK），不是 UTF-8。
+                # 這裡只看結束碼，所以解碼失敗也不能讓它拋例外。
+                encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return probe.returncode == 0
+        except (OSError, ValueError):
+            return False
+    return SCHEDULE_PLIST.exists()
 
 
 def _schedule_status() -> dict:
@@ -174,9 +283,8 @@ def _schedule_status() -> dict:
             continue
 
     days_since = (date.today() - last_run.date()).days if last_run else None
-    installed = SCHEDULE_PLIST.exists()
     return {
-        "installed": installed,
+        "installed": _schedule_installed(),
         "last_run": last_run,
         "days_since": days_since,
         "stale": days_since is None or days_since > SCHEDULE_STALE_DAYS,
@@ -205,12 +313,7 @@ def build_view(force_refresh: bool = False) -> dict:
     positions_doc = store.load_positions_doc()
 
     rules_cfg = strategy.get("rules") or {}
-    base_rules = Rules(
-        stop_loss_pct=float(rules_cfg.get("stop_loss_pct", 10.0)),
-        take_profit_pct=float(rules_cfg.get("take_profit_pct", 22.0)),
-        stop_basis=str(rules_cfg.get("stop_basis", "cost")),
-        near_threshold_pct=float(rules_cfg.get("near_threshold_pct", 3.0)),
-    )
+    base_rules = Rules.from_config(rules_cfg)
     overrides = {
         str(k): v for k, v in (strategy.get("overrides") or {}).items() if v
     }
@@ -475,12 +578,7 @@ def settings():
     return render_template(
         "settings.html",
         objective=str(strategy.get("objective") or "").strip(),
-        rules=Rules(
-            stop_loss_pct=float(rules_cfg.get("stop_loss_pct", 10.0)),
-            take_profit_pct=float(rules_cfg.get("take_profit_pct", 22.0)),
-            stop_basis=str(rules_cfg.get("stop_basis", "cost")),
-            near_threshold_pct=float(rules_cfg.get("near_threshold_pct", 3.0)),
-        ),
+        rules=Rules.from_config(rules_cfg),
         changelog=list(strategy.get("changelog") or [])[::-1],
     )
 
@@ -536,6 +634,11 @@ def history_report(trade_date: str):
     """打開單一天的報告全文（含模擬倉那一段）。"""
     import re
 
+    # 這裡原本還有 `import markdown as _md` 與 `from markupsafe import Markup`，
+    # 兩個都沒有被用到，但那個 import markdown 是**無條件**的——
+    # 於是沒裝 markdown 時這頁會 500，而不是像 render_markdown()
+    # 說好的那樣退回純文字。降級路徑只在 render_markdown() 裡面。
+
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", trade_date):
         return redirect(url_for("history"))
     path = REPORT_DIR / f"{trade_date}.md"
@@ -571,11 +674,27 @@ def paper_page():
         # 顯示一則看得懂的訊息，而不是一頁 500，也不是假裝帳戶是空的。
         return render_template("paper.html", enabled=True, broken=str(exc))
 
+    # 抓不到行情就降級用快取——但一定要說出來。
+    # 原本這裡把例外整個丟掉（連名字都沒綁），畫面上沒有任何痕跡：
+    # 下面 current_price 會退回 pos.entry_price，於是未實現損益
+    # 整欄顯示為 0，看起來像「今天剛好都沒漲跌」。
+    # 「數字照樣漂亮，只是錯的」正是這個專案最想避免的失敗方式。
+    quote_warning = None
     try:
         quotes, fetched_at, _ = store.get_quotes(force=False)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         cached = store.cached_quotes_or_none()
         quotes, fetched_at = cached if cached else ({}, None)
+        if fetched_at is not None:
+            quote_warning = (
+                f"這次連線抓取失敗（{exc}），下面用的是 "
+                f"{fetched_at.strftime('%m/%d %H:%M')} 的快取報價。"
+            )
+        else:
+            quote_warning = (
+                f"這次連線抓取失敗（{exc}），而且沒有可用的快取報價——"
+                "下面的「現價」全部退回進場價，未實現損益不是真的，請不要據此做決定。"
+            )
 
     holdings = []
     for code, pos in account.positions.items():
@@ -642,6 +761,7 @@ def paper_page():
         equity_now=equity_now,
         latest_report=latest_report,
         fetched_at=fetched_at,
+        quote_warning=quote_warning,
     )
 
 

@@ -1,2 +1,10 @@
+{"trade_date": "2026-08-20", "equity": 1000000.0, "cash": 1000000.0, "holdings": 0}
 {"trade_date": "2026-08-21", "equity": 1000000.0, "cash": 1000000.0, "holdings": 0}
-{"trade_date": "2026-08-28", "equity": 1002739.0, "cash": 858739.0, "holdings": 1}
+{"trade_date": "2026-08-24", "equity": 996750.0, "cash": 864750.0, "holdings": 1}
+{"trade_date": "2026-08-25", "equity": 1006250.0, "cash": 864750.0, "holdings": 1}
+{"trade_date": "2026-08-26", "equity": 1002362.2, "cash": 676602.2, "holdings": 2}
+{"trade_date": "2026-08-27", "equity": 1005962.2, "cash": 676602.2, "holdings": 2}
+{"trade_date": "2026-08-28", "equity": 1007390.6, "cash": 486650.6, "holdings": 3}
+{"trade_date": "2026-08-31", "equity": 1021010.6, "cash": 486650.6, "holdings": 3}
+{"trade_date": "2026-09-01", "equity": 1028910.6, "cash": 486650.6, "holdings": 3}
+{"trade_date": "2026-09-02", "equity": 1024650.6, "cash": 486650.6, "holdings": 3}

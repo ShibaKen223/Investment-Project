@@ -33,9 +33,14 @@ data/history/.*.lock
 
 config/mail.yaml
 data/app.log
+data/app.err.log
 data/daily.log
 data/quotes_cache.json
 data/backups/
+
+# 個人的 Claude Code 設定（桌面通知 hook 等），只適用這台機器
+.claude/settings.local.json
+.claude/notify.ps1
 
 # ad-hoc 簽章產物，因機器而異，不必進版控
 launch/*.app/Contents/_CodeSignature/

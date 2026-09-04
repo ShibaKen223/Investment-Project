@@ -25,6 +25,7 @@ main.py 每天抓完收盤行情之後呼叫 run_daily()，它負責:
 
 from __future__ import annotations
 
+import socket
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -67,13 +68,16 @@ def min_ready_codes(config: dict) -> int:
         return DEFAULT_MIN_READY_CODES
 
 
-def ingest_quotes(codes: list[str], quotes: dict[str, Quote]) -> list[str]:
-    """把今天的行情寫進歷史日 K。回傳成功寫入的代號。
+def todays_bars(codes: list[str], quotes: dict[str, Quote]) -> dict[str, Bar]:
+    """把今天的行情轉成日 K，但**不寫檔**。
 
     開高低任一欄缺值就跳過——盤中無成交的標的，
     用收盤價補出來的假 K 棒會污染均線。
+
+    刻意跟寫檔分開，因為 dry-run 也需要今天這根 K:
+    它不能寫進歷史檔，但沒有它的話 run_day() 就找不到今天的開盤價（見 run_daily）。
     """
-    written: list[str] = []
+    bars: dict[str, Bar] = {}
     for code in codes:
         quote = quotes.get(code)
         if quote is None:
@@ -89,8 +93,16 @@ def ingest_quotes(codes: list[str], quotes: dict[str, Quote]) -> list[str]:
             volume=int(quote.volume or 0),
         )
         if bar.is_valid:
-            history.save_bars(code, [bar])
-            written.append(code)
+            bars[code] = bar
+    return bars
+
+
+def ingest_quotes(codes: list[str], quotes: dict[str, Quote]) -> list[str]:
+    """把今天的行情寫進歷史日 K。回傳成功寫入的代號。"""
+    written: list[str] = []
+    for code, bar in todays_bars(codes, quotes).items():
+        history.save_bars(code, [bar])
+        written.append(code)
     return written
 
 
@@ -104,12 +116,53 @@ def _log_run(record: dict, dry_run: bool) -> None:
         pass   # 稽核紀錄寫不進去，不該讓整份日報產不出來
 
 
+def this_machine() -> str:
+    """這台機器的識別字串，寫進狀態檔當「這本帳是誰的」。
+
+    用主機名而不是 UUID，是因為錯誤訊息要能讓人一眼認出是哪台
+    （「這本帳屬於 MacBook-Air」比一串亂碼有用得多）。
+    """
+    try:
+        name = socket.gethostname().strip()
+    except OSError:
+        name = ""
+    return name or "unknown-host"
+
+
+def _missing_trading_days(
+    universe: dict[str, Series], last_date: str, trade_date: str
+) -> list[str]:
+    """last_date 與 trade_date 之間、還沒被處理過的交易日。
+
+    交易日直接從歷史資料本身推導（所有標的看得到的日期取聯集），
+    不維護假日表——農曆年、颱風假、補班日自動處理，
+    理由跟 history.py 推導「那個月應該有幾根 K」是同一個。
+    """
+    if not last_date or not trade_date or last_date >= trade_date:
+        return []
+    seen: set[str] = set()
+    for series in universe.values():
+        for bar in series.bars:
+            if last_date < bar.date < trade_date:
+                seen.add(bar.date)
+    return sorted(seen)
+
+
 def run_daily(
     trade_date: str,
     quotes: dict[str, Quote],
     dry_run: bool = False,
+    catch_up: bool = False,
+    claim_owner: bool = False,
 ) -> dict | None:
-    """跑一天的模擬倉。回傳給報告用的 dict；未啟用時回傳 None。"""
+    """跑一天的模擬倉。回傳給報告用的 dict；未啟用時回傳 None。
+
+    catch_up=True 時，會把 last_date 到 trade_date 之間漏掉的交易日
+    依序補跑完再跑今天；預設 False，遇到缺口直接拒絕執行（見下面說明）。
+
+    claim_owner=True 時，把這本帳的擁有權轉移到這台機器上。
+    只有在你確定「決策機換人了」的時候才該用——見下面的擁有權保護。
+    """
     config = load_config()
     if not is_enabled(config):
         return None
@@ -119,6 +172,48 @@ def run_daily(
     params = StrategyParams.from_dict(config.get("strategy"))
 
     account = paper.load_state(account_params.initial_cash)
+
+    # --- 擁有權保護（跨機器） ---
+    # data/paper_state.json 在版控裡，而它是一本每天都會變的機器產出帳本。
+    # 兩台機器各自跑排程時，git 幫不上任何忙：它要嘛把兩份 JSON 當文字合併，
+    # 要嘛讓後 pull 的那邊直接覆蓋掉——兩種結果都不會報錯。
+    #
+    # 實際發生過（2026-08）：origin/main 的 2881 記成 8/28 @ 141.141
+    # （用的是 8/21 的訊號內容，因為那台機器跳過了 8/22~8/27），
+    # 而另一台機器的同一筆是 8/24 @ 135.135。兩本帳、兩個成本、
+    # 兩條淨值曲線，畫面上都正常，差 4.5% 的價格沒有任何地方看得出來。
+    #
+    # 「只能有一台機器跑排程」這條規則原本只寫在 docs/HANDOFF.md 裡。
+    # 寫在文件裡的規則擋不住排程——所以改成程式自己檢查，
+    # 而且比照 data_guard 與缺口保護：不成交、不寫 last_date、不記淨值。
+    owner = this_machine()
+    if account.owner and account.owner != owner and not claim_owner:
+        message = (
+            f"⚠️ **今天不算數**：這本模擬倉帳是 **{account.owner}** 在寫的，"
+            f"但現在跑的是 **{owner}**。\n"
+            "> \n"
+            "> 兩台機器各自成交會產生兩本對不起來的帳（不同成本、不同持股、"
+            "不同淨值），而且 git 合併時不會報錯，只會安靜地留下一本。"
+            "**所以這一天沒有被記錄下來。**\n"
+            "> \n"
+            f"> 如果決策機真的要換成 {owner}：先確認已經 "
+            "`git pull` 到最新的帳本，再跑一次 "
+            "`python3 src/main.py --claim-owner` 接手。\n"
+            f"> 如果決策機還是 {account.owner}：這台只要 `git pull` 看結果，"
+            "把每日排程移除（Windows 用 "
+            "`launch\\win\\install_daily.ps1 -Uninstall`，"
+            "macOS 用 `bash launch/install_daily.sh --uninstall`）。"
+        )
+        _log_run(
+            {
+                "trade_date": trade_date,
+                "status": "owner_mismatch",
+                "state_owner": account.owner,
+                "this_machine": owner,
+            },
+            dry_run,
+        )
+        return {"skipped": message, "owner_mismatch": True}
 
     # 追蹤池 = 設定裡的持股+觀察清單，「加上」模擬倉現在還抱著的代號。
     #
@@ -138,6 +233,7 @@ def run_daily(
         )
         return {"skipped": message}
 
+    today_bars = todays_bars(codes, quotes)
     if not dry_run:
         ingest_quotes(codes, quotes)
 
@@ -147,6 +243,26 @@ def run_daily(
         # 還原權值後的價格：除權息與分割的假斷崖會誤觸發停損，
         # 也會讓均線在事件後 60 天內整段失真。
         bars = history.load_bars_adjusted(code)
+
+        # 今天這根 K 一定要在 series 裡，不管有沒有寫檔。
+        #
+        # dry-run 不寫歷史檔，所以在記憶體裡補上。少了這一步，series 最新的
+        # 一根是昨天，run_day() 找不到今天的開盤價 → 昨天的委託會全部被判成
+        # 「當日無開盤價」而作廢，進出場判斷也整段跳過。dry-run 於是印出一份
+        # 「今天什麼都沒做」的假報告——而「先看看它會做什麼」正是 dry-run
+        # 唯一的用途。
+        #
+        # 實跑時上面已經寫進去了，這裡的日期比對會讓它自動變成 no-op。
+        # 用 > 而不是 !=，是為了擋掉行情日期比歷史還舊的情況（連假、
+        # 資料源沒更新）——那種 bar 接到尾巴會讓序列不再是時間順序。
+        #
+        # 今天這根是未還原的原始價，接在還原序列後面是對的：
+        # 還原是把「過去」的價格調整到「現在」的基準上，今天本身不需要調整。
+        bar = today_bars.get(code)
+        if bar is not None and (not bars or bar.date > bars[-1].date):
+            bars = bars + [bar]
+
+
         if not bars:
             continue
         universe[code] = Series(code=code, bars=bars)
@@ -205,6 +321,39 @@ def run_daily(
         )
         return {"skipped": message, "insufficient": True, **base_log}
 
+    # --- 排程斷線保護 ---
+    # run_day() 只認「你叫它跑哪一天」，不會發現自己漏了幾天。
+    # 排程斷線超過一天再恢復時，資料源給的是最新那天，
+    # 於是中間的交易日整段憑空消失：不報錯、數字照樣算得出來，
+    # 但那幾天的訊號沒被記錄，而且昨天決定的委託會用錯誤的開盤價成交。
+    # 實際發生過：2026-08-22~08-30 共 9 個交易日被跳過，
+    # 2881 那筆 8/21 決定的委託用 8/31（而非 8/24）的開盤價成交。
+    #
+    # monitor.staleness_warning() 抓得到這件事，但它在 main.py 裡是
+    # 「引擎跑完之後」才檢查的——那時 last_date 已經被推到今天，
+    # 警告永遠不會觸發。所以這道保護一定要在成交之前。
+    missing = _missing_trading_days(universe, account.last_date, trade_date)
+    if missing and not catch_up:
+        shown = "、".join(missing[:5]) + ("… 等" if len(missing) > 5 else "")
+        message = (
+            f"⚠️ **今天不算數**：模擬倉停在 {account.last_date}，"
+            f"但現在要跑的是 {trade_date}，中間有 {len(missing)} 個交易日沒跑過"
+            f"（{shown}）。\n"
+            "> \n"
+            "> 直接跑今天會讓那幾天的訊號永久消失，"
+            "昨天決定的委託也會用錯誤的開盤價成交，所以**這一天沒有被記錄下來**。\n"
+            "> \n"
+            "> 補跑：先確認歷史沒有缺口"
+            "（`python3 src/history.py --months 2` 與 `--fill-gaps`），"
+            "再跑 `python3 src/main.py --catch-up` 逐日推進。"
+        )
+        _log_run(
+            {**base_log, "status": "gap_detected", "missing_days": len(missing),
+             "last_date": account.last_date},
+            dry_run,
+        )
+        return {"skipped": message, "gap": True, "missing_days": missing, **base_log}
+
     # 訊號數只是給稽核紀錄用的，run_day 內部會自己重算一次。
     entry_signals = 0
     for code in ready:
@@ -216,15 +365,24 @@ def run_daily(
             entry_signals += 1
 
     before_trades = len(account.trades)
-    result = paper.run_day(
-        account, trade_date, universe, params, account_params, costs
-    )
 
-    if not dry_run:
-        for trade in account.trades[before_trades:]:
-            paper.append_trade(trade)
-        paper.append_equity(result)
-        paper.save_state(account)
+    # 補跑時一天一天推進，不是直接跳到今天——每一天都要各自成交、
+    # 各自記淨值，中間那些天的委託才會用它們自己的開盤價。
+    dates_to_run = (missing if catch_up else []) + [trade_date]
+    result = None
+    # 蓋上「這本帳是誰寫的」。第一次跑（owner 空的）等於自動認領，
+    # 之後別台機器再跑就會被上面的擁有權保護擋下來。
+    account.owner = owner
+    for run_date in dates_to_run:
+        day_before = len(account.trades)
+        result = paper.run_day(
+            account, run_date, universe, params, account_params, costs
+        )
+        if not dry_run:
+            for trade in account.trades[day_before:]:
+                paper.append_trade(trade)
+            paper.append_equity(result)
+            paper.save_state(account)
 
     # 績效一律以 append-only 的紀錄檔為準，不要用 account.trades——
     # load_state() 不還原歷史成交，account.trades 只有「這次執行剛平倉」的那幾筆，

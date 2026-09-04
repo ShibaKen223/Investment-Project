@@ -7,11 +7,28 @@
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 
 from datasource import Quote
 from portfolio import Evaluation, Signal, objective_is_unset
 from strategy import exit_levels
+
+
+def _safe_name(value: object) -> str:
+    """把資料源給的名稱轉義之後才放進報告。
+
+    報告最後會被 webapp 用 `|safe` 渲染（報告自己用了 <details> 來摺疊
+    「今天為什麼沒進場」，所以不能轉義整份），而 render_markdown() 的
+    註解寫著「報告是本機自己產生的檔案，不是使用者輸入，所以直接信任」——
+    那個前提對了一半：本機的是**寫入**，不是**來源**。
+
+    這些名稱直接來自 TWSE / TPEx 的 JSON（Name / CompanyName 欄位）。
+    上游哪天回傳 <img src=x onerror=...>，它就會變成儀表板上可以執行的
+    HTML，而這個儀表板還有一整排會改設定的 POST 路由。
+    機率很低，成本是一行。
+    """
+    return html.escape(str(value or ""), quote=False)
 
 
 def _money(value: float | None) -> str:
@@ -227,7 +244,7 @@ def build_report(
     lines.append("")
     if actionable:
         for ev in actionable:
-            name = ev.quote.name if ev.quote else ev.position.code
+            name = _safe_name(ev.quote.name) if ev.quote else ev.position.code
             action = "停損出場" if ev.signal is Signal.STOP_LOSS else "停利出場"
             trigger = (
                 f"跌破停損線 {_price(ev.stop_price)}"
@@ -290,7 +307,7 @@ def build_report(
     )
     for ev in evaluations:
         pos = ev.position
-        name = ev.quote.name if ev.quote else "—"
+        name = _safe_name(ev.quote.name) if ev.quote else "—"
         close = _quote_line(ev.quote) if ev.quote else "—"
         if pos.core:
             stop_cell = target_cell = to_stop = to_target = "—"
@@ -330,7 +347,7 @@ def build_report(
     lines.append("")
     for ev in evaluations:
         pos = ev.position
-        name = ev.quote.name if ev.quote else pos.code
+        name = _safe_name(ev.quote.name) if ev.quote else pos.code
         lines.append(f"**{pos.code} {name}**（{pos.entry_date} 進場，{_pct(ev.pnl_pct)}）")
         lines.append(f"- 買進理由：{pos.thesis or '（未填寫）'}")
         label = "出場條件" if pos.is_engine else "認錯條件"
@@ -350,7 +367,7 @@ def build_report(
         lines.append("| --- | --- | ---: | --- |")
         for entry, quote in watchlist:
             code = entry.get("code", "")
-            name = quote.name if quote else "—"
+            name = _safe_name(quote.name) if quote else "—"
             close = _quote_line(quote) if quote else "查無行情"
             lines.append(f"| {code} | {name} | {close} | {entry.get('note', '')} |")
         lines.append("")

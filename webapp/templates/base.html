@@ -42,6 +42,7 @@
       資料僅存放在這台電腦上，不會上傳到任何地方。
     </span>
     <form method="post" action="{{ url_for('quit_app') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <button class="ghost small">結束儀表板</button>
     </form>
   </p>

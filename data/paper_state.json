@@ -1,18 +1,50 @@
 {
-  "cash": 858739.0,
-  "last_date": "2026-08-28",
+  "cash": 486650.6,
+  "last_date": "2026-09-02",
   "positions": {
     "2881": {
       "code": "2881",
       "shares": 1000,
-      "entry_price": 141.141,
-      "entry_date": "2026-08-28",
-      "entry_fee": 120.0,
+      "entry_price": 135.135,
+      "entry_date": "2026-08-24",
+      "entry_fee": 115.0,
       "entry_reason": "收盤 134.00 站上 60 日均線 124.25；收盤站上 20 日均線 128.00；突破前 20 日高點 132.50；近 20 日均量 19557 張，流動性足夠",
-      "peak_close": 144.0,
-      "bars_held": 0,
+      "peak_close": 145.0,
+      "bars_held": 7,
+      "entry_atr": 0.0
+    },
+    "00919": {
+      "code": "00919",
+      "shares": 6000,
+      "entry_price": 31.3313,
+      "entry_date": "2026-08-26",
+      "entry_fee": 160.0,
+      "entry_reason": "收盤 31.07 站上 60 日均線 29.72；收盤站上 20 日均線 29.99；突破前 20 日高點 30.87；近 20 日均量 59814 張，流動性足夠",
+      "peak_close": 32.35,
+      "bars_held": 5,
+      "entry_atr": 0.0
+    },
+    "1301": {
+      "code": "1301",
+      "shares": 3000,
+      "entry_price": 63.2632,
+      "entry_date": "2026-08-28",
+      "entry_fee": 162.0,
+      "entry_reason": "收盤 63.10 站上 60 日均線 55.87；收盤站上 20 日均線 57.30；突破前 20 日高點 61.80；近 20 日均量 27276 張，流動性足夠",
+      "peak_close": 67.8,
+      "bars_held": 3,
       "entry_atr": 0.0
     }
   },
-  "pending": []
+  "pending": [
+    {
+      "code": "2884",
+      "side": "BUY",
+      "shares": 5000,
+      "decided_on": "2026-09-02",
+      "reason": "ENTRY",
+      "detail": "收盤 40.50 站上 60 日均線 36.33；收盤站上 20 日均線 38.24；突破前 20 日高點 39.90；近 20 日均量 39287 張，流動性足夠",
+      "atr": 0.0
+    }
+  ]
 }

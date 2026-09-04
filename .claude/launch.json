@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "investment-dashboard",
-      "runtimeExecutable": "python3",
+      "runtimeExecutable": "py",
       "runtimeArgs": ["webapp/app.py"],
       "port": 5173
     }

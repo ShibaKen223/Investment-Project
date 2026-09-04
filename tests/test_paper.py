@@ -390,6 +390,78 @@ check(
     str(rej),
 )
 
+# --- 零股 ---
+# 整張模式下 20 萬預算買不到一張 7580 元的股票（一張 758 萬）；
+# 開放零股之後同一筆預算要能買到 26 股 ≈ 19.7 萬。
+check(
+    "整張模式：一張超過預算就是 0 股",
+    paper._shares_affordable(1_000_000, 7580.0, 200_000, 1000) == 0,
+    str(paper._shares_affordable(1_000_000, 7580.0, 200_000, 1000)),
+)
+check(
+    "零股模式：同一筆預算買得到 26 股",
+    paper._shares_affordable(1_000_000, 7580.0, 200_000, 1) == 26,
+    str(paper._shares_affordable(1_000_000, 7580.0, 200_000, 1)),
+)
+check(
+    "零股買到的金額不超過部位上限",
+    paper._shares_affordable(1_000_000, 7580.0, 200_000, 1) * 7580.0 <= 200_000,
+)
+check(
+    "零股仍受現金限制（現金 5 萬 → 買不到 26 股）",
+    paper._shares_affordable(50_000, 7580.0, 200_000, 1) == 6,
+    str(paper._shares_affordable(50_000, 7580.0, 200_000, 1)),
+)
+
+odd_lot = Account(cash=1_000_000.0)
+odd_lot.pending = [Order(code="TEST", side="BUY", shares=26, decided_on="d")]
+paper.execute_pending(odd_lot, "2026-01-02", {"TEST": 7580.0}, costs, 1)
+check(
+    "零股委託會真的成交，不再被退單",
+    odd_lot.positions.get("TEST") is not None
+    and odd_lot.positions["TEST"].shares == 26,
+    str(odd_lot.positions),
+)
+
+# 賣出零股部位：不能有「賣不掉的殭屍持股」。
+odd_sell = Account(cash=0.0)
+odd_sell.positions["TEST"] = paper.PaperPosition(
+    code="TEST", shares=26, entry_price=7580.0, entry_date="2026-01-02",
+    entry_fee=120.0, peak_close=7580.0, bars_held=5,
+)
+odd_sell.pending = [Order(code="TEST", side="SELL", shares=26,
+                          decided_on="d", reason=strategy.TAKE_PROFIT)]
+odd_fills = paper.execute_pending(odd_sell, "2026-01-10", {"TEST": 8000.0}, costs, 1)
+check(
+    "零股部位賣得掉，不會變成殭屍持股",
+    odd_fills[0]["status"] == "FILLED" and not odd_sell.positions,
+    str(odd_fills),
+)
+
+# 卡住的到底是現金還是部位上限——舊訊息一律說「資金不足（可用 X 元）」，
+# 而 X 印的是現金。最常見的情況其實是現金很多、但一張就超過 20% 上限，
+# 那句話會讓人以為再等錢進來就好，實際上再多的錢也買不到。
+# 500 元的股票：一張 50 萬 < 現金 85 萬，但 > 部位上限 20 萬。
+why_cap = paper._why_unaffordable(500.0, 858_739, 200_000, 1000, 0)
+check(
+    "買不起的理由要指出是部位上限，不是現金",
+    "部位上限" in why_cap and "卡住的不是現金" in why_cap,
+    why_cap,
+)
+# 2330 那種一張 244 萬的，現金與上限同時擋住，要兩個都講。
+why_both = paper._why_unaffordable(2440.0, 858_739, 200_000, 1000, 0)
+check(
+    "現金與上限同時不夠時，兩個都要講出來",
+    "部位上限" in why_both and "現金" in why_both,
+    why_both,
+)
+why_cash = paper._why_unaffordable(100.0, 50_000, 200_000, 1000, 0)
+check(
+    "真的是現金不夠時才說現金",
+    "現金只剩" in why_cash,
+    why_cash,
+)
+
 # 停牌 → 作廢不順延
 halted = Account(cash=1_000_000.0)
 halted.pending = [Order(code="TEST", side="BUY", shares=1000, decided_on="d")]
@@ -560,6 +632,7 @@ print("--- 累計績效的來源是紀錄檔，不是帳戶狀態 ---")
 # 所以「完成交易 N 筆」每天都從零開始，而且網頁跟報告會顯示兩個不同的數字。
 
 import json       # noqa: E402
+import shutil  # noqa: E402
 import tempfile  # noqa: E402
 
 _tmp = Path(tempfile.mkdtemp(prefix="paper-test-"))
@@ -567,6 +640,11 @@ paper.DATA_DIR = _tmp
 paper.TRADES_FILE = _tmp / "paper_trades.jsonl"
 paper.EQUITY_FILE = _tmp / "paper_equity.jsonl"
 paper.STATE_FILE = _tmp / "paper_state.json"
+# 五個路徑要一起改。paper.py 是在 import 時就從 DATA_DIR 算出它們的，
+# 只改 DATA_DIR 不會連動——這一段目前沒有呼叫到 append_run()，
+# 所以漏掉 RUNS_FILE 還沒出事，但那只是運氣，加一條斷言就會寫進
+# 版控裡的 data/paper_runs.jsonl。（test_paperdaily.py 就真的踩到了。）
+paper.RUNS_FILE = _tmp / "paper_runs.jsonl"
 
 for _t in sample:
     paper.append_trade(_t)
@@ -804,6 +882,82 @@ check(
     "dry-run 不寫稽核紀錄",
     len(paper.load_runs()) == _before,
 )
+
+# --------------------------------------------------------------------------
+# 排程斷線：last_date 與今天之間漏掉的交易日
+#
+# 2026-08-22~08-30 共 9 個交易日被靜默跳過，2881 那筆 8/21 決定的委託
+# 因此用 8/31（而非 8/24）的開盤價成交。守的就是「不准跳過去」。
+# --------------------------------------------------------------------------
+
+_gap_tmp = Path(tempfile.mkdtemp(prefix="paper-gap-"))
+paper.DATA_DIR = _gap_tmp
+paper.TRADES_FILE = _gap_tmp / "paper_trades.jsonl"
+paper.EQUITY_FILE = _gap_tmp / "paper_equity.jsonl"
+paper.STATE_FILE = _gap_tmp / "paper_state.json"
+paper.RUNS_FILE = _gap_tmp / "paper_runs.jsonl"
+
+_install_fake_history({f"900{i}": _rich for i in range(12)}, min_ready=10)
+
+# 讓引擎停在第 41 根 K，然後叫它跑最後一根——中間隔了 38 個交易日。
+_stale = paper.load_state(1_000_000.0)
+_stale.last_date = _rich[40].date
+paper.save_state(_stale)
+_expected_missing = [b.date for b in _rich[41:-1]]
+
+_gap = paperdaily.run_daily(_rich_day, {}, dry_run=False)
+check(
+    "中間漏掉交易日時拒絕執行，而不是安靜跳過去",
+    _gap.get("gap") is True,
+    str(_gap)[:160],
+)
+check(
+    "漏掉的交易日要全部列出來",
+    _gap.get("missing_days") == _expected_missing,
+    f"{len(_gap.get('missing_days') or [])} != {len(_expected_missing)}",
+)
+check(
+    "被擋下來時不能推進 last_date（推了就再也補不回來）",
+    paper.load_state(1_000_000.0).last_date == _rich[40].date,
+    paper.load_state(1_000_000.0).last_date,
+)
+check(
+    "被擋下來時不能寫淨值",
+    not paper.EQUITY_FILE.exists(),
+)
+check(
+    "訊息要告訴人怎麼補跑",
+    "--catch-up" in _gap.get("skipped", ""),
+    _gap.get("skipped", "")[:160],
+)
+
+# 帶 catch_up 就逐日推進，而不是一次跳到今天
+_caught = paperdaily.run_daily(_rich_day, {}, dry_run=False, catch_up=True)
+check(
+    "catch_up 會真的把模擬倉跑起來",
+    "result" in _caught,
+    str(_caught)[:160],
+)
+check(
+    "catch_up 之後 last_date 推進到今天",
+    paper.load_state(1_000_000.0).last_date == _rich_day,
+    paper.load_state(1_000_000.0).last_date,
+)
+check(
+    "補跑是一天一筆淨值，不是只記今天一筆",
+    len(paper.load_equity_values()) == len(_expected_missing) + 1,
+    f"{len(paper.load_equity_values())} 筆，預期 {len(_expected_missing) + 1} 筆",
+)
+
+# 沒有缺口時不該被誤擋（同一天重跑仍然走既有的 already_ran 分支）
+_again = paperdaily.run_daily(_rich_day, {}, dry_run=False)
+check(
+    "沒有缺口時不會被缺口保護誤擋",
+    _again.get("gap") is None,
+    str(_again)[:160],
+)
+
+shutil.rmtree(_gap_tmp, ignore_errors=True)
 
 _history.universe_from_config = _orig_universe
 _history.load_bars = _orig_load_bars

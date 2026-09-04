@@ -12,6 +12,11 @@
 pip install -r requirements.txt
 ```
 
+> **Windows 使用者**：雙擊 `launch\win\安裝.bat` 就會全部裝好，不用手動打指令。
+> 要手動的話請用 `py` 而不是 `python`／`python3`——Windows 內建的 `python`
+> 通常是 Microsoft Store 的空殼，執行起來直接 exit 49。
+> **底下所有 `python3 xxx.py` 在 Windows 上都請讀成 `py xxx.py`。**
+
 ### 換掉範例持股
 
 打開 `config/positions.yaml`，把裡面的三筆範例**全部刪掉**，換成你自己的。

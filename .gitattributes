@@ -1,4 +1,31 @@
 # ============================================================
+# 模擬倉帳本：禁止自動合併
+# ============================================================
+# data/paper_*.json(l) 與 signals.jsonl 是「機器每天產出、會一直變」的帳本，
+# 不是人寫的原始碼。git 預設會拿它們當文字合併，而那對帳本永遠是錯的：
+#
+#   - paper_state.json 是一份 JSON 快照。兩邊各改幾行合起來，
+#     會得到一個語法正確、內容不屬於任何一台機器的帳
+#     （現金是 A 的、持股是 B 的、last_date 是誰的都有可能）。
+#   - paper_trades.jsonl / paper_equity.jsonl 是 append-only。
+#     文字合併會把兩台機器的紀錄交錯疊在一起，
+#     於是同一天出現兩筆淨值、同一筆交易被記兩次。
+#
+# 兩種結果都不會報錯。加上 -merge 之後，分岔會變成一個
+# 「你必須自己選一邊」的衝突，而不是一份安靜產生的假帳。
+#
+# 真的撞到衝突時：決定哪一台是決策機，用它那份覆蓋
+#   git checkout --theirs data/paper_state.json   # 或 --ours
+# 然後確認 owner 欄位是那台機器，再 git add + commit。
+# 詳見 docs/HANDOFF.md 的「兩本帳」那一節。
+
+data/paper_state.json   -merge
+data/paper_trades.jsonl -merge
+data/paper_equity.jsonl -merge
+data/paper_runs.jsonl   -merge
+data/signals.jsonl      -merge
+
+# ============================================================
 # 換行處理 —— 這個 repo 同時被 macOS 和 Windows 用
 # ============================================================
 # 沒有這個檔案的話，core.autocrlf 會在兩邊各自「幫忙」，
