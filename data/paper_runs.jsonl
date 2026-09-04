@@ -5,3 +5,5 @@
 {"ran_at": "2026-08-27T15:00:00(補跑)", "trade_date": "2026-08-27", "universe": 54, "with_bars": 54, "ready": 38, "status": "backfilled", "fills": 0, "orders": 1, "holdings": 2, "equity": 1005962.2, "cash": 676602.2}
 {"ran_at": "2026-08-28T15:00:00(補跑)", "trade_date": "2026-08-28", "universe": 54, "with_bars": 54, "ready": 38, "status": "backfilled", "fills": 1, "orders": 0, "holdings": 3, "equity": 1007390.6, "cash": 486650.6}
 {"ran_at": "2026-08-31T15:00:00(補跑)", "trade_date": "2026-08-31", "universe": 54, "with_bars": 54, "ready": 38, "status": "backfilled", "fills": 0, "orders": 0, "holdings": 3, "equity": 1021010.6, "cash": 486650.6}
+{"ran_at": "2026-09-02T15:00:15", "trade_date": "2026-09-01", "universe": 54, "with_bars": 54, "ready": 38, "short": 16, "status": "ok", "entry_signals": 4, "fills": 0, "orders": 0, "holdings": 3, "equity": 1028910.6, "cash": 486650.6}
+{"ran_at": "2026-09-03T15:01:46", "trade_date": "2026-09-02", "universe": 54, "with_bars": 54, "ready": 38, "short": 16, "status": "ok", "entry_signals": 1, "fills": 0, "orders": 1, "holdings": 3, "equity": 1024650.6, "cash": 486650.6}
