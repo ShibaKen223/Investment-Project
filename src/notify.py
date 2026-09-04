@@ -176,3 +176,45 @@ def notify_if_actionable(trade_date: str, actionable: list, summary: dict) -> st
         return f"寄信失敗：{exc}"
     _mark_sent(digest, trade_date)
     return f"已寄出提醒信到 {cfg['to']}。"
+
+
+def _send_test() -> int:
+    """寄一封測試信，驗證 config/mail.yaml 設定是否可用。
+
+    給第一次設定的人跑的：`python src/notify.py --test`。
+    正式的提醒信只在觸發停損／停利時才寄，沒有這個指令的話，
+    設定錯了要等到第一次真的觸發那天才會發現——而那天正是最不能漏信的一天。
+    """
+    try:
+        cfg = load_mail_config()
+    except MailNotConfigured as exc:
+        print(f"設定還沒完成：{exc}")
+        return 1
+    if "還沒填" in str(cfg.get("app_password", "")):
+        print("config/mail.yaml 的 app_password 還沒填。")
+        print("到 https://myaccount.google.com/apppasswords 產生 16 碼應用程式密碼，")
+        print("貼進 config/mail.yaml 的 app_password 欄位後再跑一次。")
+        return 1
+    try:
+        send(
+            "[投資提醒] 測試信",
+            "這是一封測試信。收到它代表 Email 通知設定完成，\n"
+            "之後有部位觸發停損／停利時就會收到提醒。\n\n"
+            "本信由 python src/notify.py --test 手動觸發。",
+            cfg,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"寄信失敗：{exc}")
+        print("最常見的原因：app_password 貼錯（要用應用程式密碼，不是登入密碼）。")
+        return 1
+    print(f"測試信已寄出到 {cfg['to']}，去信箱確認一下（也看看垃圾郵件夾）。")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    if "--test" in sys.argv:
+        raise SystemExit(_send_test())
+    print("用法：python src/notify.py --test  （寄一封測試信驗證設定）")
+    raise SystemExit(2)
