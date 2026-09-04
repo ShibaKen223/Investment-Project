@@ -99,7 +99,11 @@ if ($gapExit -ne 0) {
   Add-Content -Path $log -Value "⚠️ 破洞修補失敗（結束碼 $gapExit），繼續往下跑。" -Encoding utf8
 }
 
-$mainExit = Invoke-Step '[3/3] 產生今日報告（模擬倉也會前進一天）' @((Join-Path $root 'src\main.py'), '--quiet')
+# --catch-up：資料源晚更新或電腦沒開而漏掉的交易日，下次執行時逐日補跑
+# （各天用各自的開盤價成交），而不是拒跑等人手動救。
+# 2026-09-03 實際發生過：15:01 執行時證交所還沒發布當日資料，該次空轉，
+# 沒有 --catch-up 的話隔天起每天都會因缺口保護拒絕執行。
+$mainExit = Invoke-Step '[3/3] 產生今日報告（模擬倉也會前進一天）' @((Join-Path $root 'src\main.py'), '--quiet', '--catch-up')
 
 $done = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 if ($mainExit -eq 0) {
@@ -126,6 +130,9 @@ if ($mainExit -eq 0) {
       'data/paper_runs.jsonl'
       'data/signals.jsonl'
       'data/reports'
+      # 歷史日 K 自 2026-08-30 起進版控（見 .gitignore），每天長出來的
+      # 新 K 棒也要推上去，Mac 那邊 git pull 才有最新資料可看。
+      'data/history'
     ) | Where-Object { Test-Path (Join-Path $root $_) }
 
     if (-not $syncPaths) {

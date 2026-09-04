@@ -49,7 +49,9 @@ fi
 # --- 3. 報告 + 模擬倉 --------------------------------------
 echo ""
 echo "[3/3] 產生今日報告（模擬倉也會前進一天）…"
-"$PY" src/main.py --quiet
+# --catch-up：漏掉的交易日（資料源晚更新、電腦沒開）下次執行時逐日補跑，
+# 與 launch/win/daily_run.ps1 的第 3 步保持一致。
+"$PY" src/main.py --quiet --catch-up
 STATUS=$?
 
 echo ""

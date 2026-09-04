@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import smtplib
 import ssl
 from email.message import EmailMessage
@@ -17,6 +19,11 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 MAIL_CONFIG = ROOT / "config" / "mail.yaml"
+
+# 上一封信的去重標記。排程一天會跑兩次（15:00 主跑 + 17:30 重試），
+# 兩次算出同一批訊號就會寄兩封一樣的信——這個檔案記住「這個交易日、
+# 這批內容已經寄過」。屬於機器狀態，不進版控（.gitignore 排除）。
+LAST_EMAIL_MARKER = ROOT / "data" / "last_email.json"
 
 
 class MailNotConfigured(Exception):
@@ -116,8 +123,41 @@ def send(subject: str, body: str, cfg: dict | None = None) -> None:
             server.send_message(message)
 
 
+def _content_digest(trade_date: str, subject: str, body: str) -> str:
+    """同一個交易日、同一份內容 → 同一個指紋。"""
+    raw = f"{trade_date}\n{subject}\n{body}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _already_sent(digest: str) -> bool:
+    """這份內容是不是已經寄過。標記檔壞掉或讀不到一律當「沒寄過」——
+    寧可重寄一封，也不要因為去重機制故障而漏掉一封該寄的信。"""
+    try:
+        record = json.loads(LAST_EMAIL_MARKER.read_text(encoding="utf-8"))
+        return record.get("digest") == digest
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _mark_sent(digest: str, trade_date: str) -> None:
+    """寄出後留下標記。寫入失敗不往外丟——信已經寄出去了，
+    標記只是防重寄，它壞掉的代價（多收一封）比讓排程掛掉小得多。"""
+    try:
+        LAST_EMAIL_MARKER.write_text(
+            json.dumps({"digest": digest, "trade_date": trade_date}),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def notify_if_actionable(trade_date: str, actionable: list, summary: dict) -> str:
-    """有觸發訊號才寄信。回傳一句給終端機看的狀態說明。"""
+    """有觸發訊號才寄信。回傳一句給終端機看的狀態說明。
+
+    同一個交易日、同一批內容只寄一次——排程一天跑兩次（15:00 + 17:30 重試），
+    沒有這個檢查的話，主跑成功的日子重試會把同一封信再寄一遍。
+    內容變了（例如重試補跑後多出訊號）仍會照寄。
+    """
     if not actionable:
         return "無觸發訊號，未寄送 Email。"
     try:
@@ -127,8 +167,12 @@ def notify_if_actionable(trade_date: str, actionable: list, summary: dict) -> st
     subject, body = build_alert_email(
         trade_date=trade_date, actionable=actionable, summary=summary
     )
+    digest = _content_digest(trade_date, subject, body)
+    if _already_sent(digest):
+        return f"這份提醒（{trade_date}）今天已寄過，未重寄。"
     try:
         send(subject, body, cfg)
     except Exception as exc:  # noqa: BLE001 - 寄信失敗不該讓整個排程掛掉
         return f"寄信失敗：{exc}"
+    _mark_sent(digest, trade_date)
     return f"已寄出提醒信到 {cfg['to']}。"

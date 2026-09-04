@@ -376,8 +376,13 @@ PC 上要改用工作排程器（Task Scheduler），執行的內容是：
 ```
 1. python src/history.py --months 2
 2. python src/history.py --fill-gaps
-3. python src/main.py --quiet
+3. python src/main.py --quiet --catch-up
 ```
+
+（2026-09-04 起 PC 上已有現成的 `launch\win\install_daily.ps1`，
+不必自己寫 .bat；它會裝兩個觸發：15:00 主跑、17:30 重試——
+資料源偶爾 15:00 還沒發布當天資料，9/03 實際發生過。
+`--catch-up` 讓漏掉的交易日隔天自動逐日補跑，不再拒跑等人手動救。）
 
 **順序不能反。** 模擬倉必須在歷史補齊之後才掃描，
 否則會得到一個假的「今天沒有訊號」——那只代表沒東西可看。
