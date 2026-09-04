@@ -8,3 +8,4 @@
 {"ran_at": "2026-09-02T15:00:15", "trade_date": "2026-09-01", "universe": 54, "with_bars": 54, "ready": 38, "short": 16, "status": "ok", "entry_signals": 4, "fills": 0, "orders": 0, "holdings": 3, "equity": 1028910.6, "cash": 486650.6}
 {"ran_at": "2026-09-03T15:01:46", "trade_date": "2026-09-02", "universe": 54, "with_bars": 54, "ready": 38, "short": 16, "status": "ok", "entry_signals": 1, "fills": 0, "orders": 1, "holdings": 3, "equity": 1024650.6, "cash": 486650.6}
 {"ran_at": "2026-09-04T15:20:48", "trade_date": "2026-09-03", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 2, "fills": 1, "orders": 1, "holdings": 4, "equity": 1034737.85, "cash": 279517.85}
+{"ran_at": "2026-09-04T17:42:37", "trade_date": "2026-09-04", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 4, "fills": 1, "orders": 0, "holdings": 5, "equity": 1046873.98, "cash": 73063.18}
