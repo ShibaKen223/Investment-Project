@@ -24,3 +24,25 @@ data/paper_trades.jsonl -merge
 data/paper_equity.jsonl -merge
 data/paper_runs.jsonl   -merge
 data/signals.jsonl      -merge
+
+# ============================================================
+# 換行處理 —— 這個 repo 同時被 macOS 和 Windows 用
+# ============================================================
+# 沒有這個檔案的話，core.autocrlf 會在兩邊各自「幫忙」，
+# 結果是下面兩種靜靜發生的問題。
+
+# .bat 必須是 CRLF，否則 cmd.exe 會解析壞。
+# 症狀不是報錯而是更難查的東西：`'x' is not recognized`，
+# 而且 `||` 之類的行會靜靜地走錯分支。
+# 在 macOS 上 clone 再把檔案拿到 Windows，正是會踩到這個的路徑。
+*.bat text eol=crlf
+
+# shell 腳本反過來，一定要 LF——CRLF 的 .sh 在 macOS/Linux 上
+# 會出現 `bad interpreter: /bin/bash^M`。
+*.sh text eol=lf
+
+# 歷史日 K 不要碰。Python 的 csv 模組寫出來就是 CRLF，
+# 如果讓 git 正規化成 LF，macOS 那邊 checkout 得到 LF、
+# history.py 一寫回又變 CRLF —— 55 個檔案每天整包 diff，
+# 覆盤時想看「這個月改了什麼」會被雜訊淹掉。
+*.csv -text

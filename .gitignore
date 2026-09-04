@@ -4,13 +4,19 @@ __pycache__/
 venv/
 .DS_Store
 
-# 原始行情快取檔案很大，可以重抓，不必進版控
+# 原始行情快取檔案很大，可以重抓，不必進版控。
+# 一個交易日約 4.5 MB（幾乎都是 tpex 那份），一年 250 個交易日就超過 1 GB，
+# 而 git 是每天存一份新 blob——事後想瘦身得改寫整段歷史才真的縮得回去。
+# 需要的話用 src/history.py --from-raw 從本機的存檔離線重建。
 data/raw/
 
-# 歷史日 K 是衍生資料，隨時能用 src/history.py 重建，不必進版控。
+# 歷史日 K 原本排除在外，理由是「衍生資料，隨時能用 src/history.py 重建」。
+# 2026-08-30 改成進版控：重建的實際代價是 55 檔 × 24 個月、被限速在 4.5 秒一次，
+# 要跑快兩小時而且一直打證交所，但整包才 1.1 MB。
+# 換機器時 clone 完就有資料可用，不必再從舊機器手動搬一次。
+#
 # 注意：模擬倉的成交與淨值紀錄（data/paper_*.jsonl）「要」進版控，
 # 理由跟 signals.jsonl 一樣——那是你之後驗證這套規則的證據。
-data/history/
 
 # 報告與訊號紀錄「要」進版控 —— 那是你的覆盤證據。
 # 如果不想公開持股，改成把整個 repo 設為 private，
@@ -19,6 +25,11 @@ data/history/
 # （paper_state.json 本身要進——它是「模擬倉現在持有什麼」的唯一紀錄）
 data/paper_state.json.bak
 data/paper_state.json.tmp
+
+# 歷史日 K 的寫入暫存檔與檔案鎖，是 src/history.py 的內部產物。
+# .lock 只有 macOS/Linux 會產生（Windows 沒有 fcntl），零位元組，不必進版控。
+data/history/*.tmp
+data/history/.*.lock
 
 config/mail.yaml
 data/app.log
