@@ -242,6 +242,69 @@ check("不同天才會新增", adjust.merge_actions(
 )[1] != [])
 
 
+# --------------------------------------------------------------------------
+# 除權息結果表的解析 —— TWSE 與 TPEX 共用同一段
+# --------------------------------------------------------------------------
+# 這兩張表的欄名幾乎一樣但不完全一樣（TWSE「股票代號」／TPEX「代號」），
+# 日期格式也不同。共用的解析要能同時吃下兩種，不然接上 TPEX 之後
+# 壞掉的方式會是「安靜地少抓一個市場」——2026-09-07 就是這樣才有 15 檔沒登記。
+
+check("民國日期：TWSE 的年月日格式",
+      adjust._roc_date_to_iso("115年06月11日") == "2026-06-11")
+check("民國日期：TPEX 的斜線格式",
+      adjust._roc_date_to_iso("115/09/07") == "2026-09-07")
+check("民國日期：看不懂要回 None",
+      adjust._roc_date_to_iso("民國一百一十五年") is None)
+
+_tpex_fields = ["除權息日期", "代號", "名稱", "除權息前收盤價", "除權息參考價",
+                "權值", "息值", "權值+息值", "權/息"]
+_tpex_rows = [
+    ["115/06/17", "3324", "雙鴻    ", "1050.00", "1038.10",
+     "0.000000", "11.900000", "11.900000", "除息"],
+    # 參考價 > 前收：不可能是除權息，要被丟掉，不能算出 factor > 1
+    ["115/06/18", "9999", "壞資料  ", "100.00", "110.00",
+     "0.000000", "0.000000", "0.000000", "除息"],
+    # 欄位缺一角：跳過就好，不該讓整個月的資料一起陪葬
+    ["115/06/19", "8888"],
+]
+_parsed = adjust._actions_from_result_table(
+    _tpex_fields, _tpex_rows, source="tpex", table_name="TPEX 除權息結果表"
+)
+check("TPEX 表格：只留下合法的那一筆", len(_parsed) == 1,
+      f"實際 {len(_parsed)} 筆")
+check("TPEX 表格：代號欄叫「代號」也認得",
+      _parsed[0].code == "3324")
+check("TPEX 表格：日期轉成 ISO",
+      _parsed[0].date == "2026-06-17")
+check("TPEX 表格：因子＝參考價÷前收",
+      abs(_parsed[0].factor - 1038.10 / 1050.00) < 1e-9)
+check("TPEX 表格：小因子不會被當成分割",
+      _parsed[0].kind == "dividend" and not _parsed[0].adjusts_volume)
+check("TPEX 表格：source 標成 tpex", _parsed[0].source == "tpex")
+
+# 同一段解析要照樣吃 TWSE 的欄名，不然共用就沒有意義
+_twse_fields = ["資料日期", "股票代號", "股票名稱",
+                "除權息前收盤價", "除權息參考價", "權/息"]
+_twse_parsed = adjust._actions_from_result_table(
+    [f for f in _twse_fields],
+    [["115年07月01日", "2884", "玉山金", "34.45", "33.05", "息"]],
+    source="twse", table_name="TWSE 除權息結果表",
+)
+check("TWSE 表格：同一段解析也吃得下",
+      len(_twse_parsed) == 1 and _twse_parsed[0].code == "2884"
+      and _twse_parsed[0].date == "2026-07-01")
+
+# 欄位真的不見了要吵，不要靜靜錯位——那種錯會變成一整批錯誤的因子
+try:
+    adjust._actions_from_result_table(
+        ["日期", "名字"], [["115/06/17", "3324"]],
+        source="tpex", table_name="TPEX 除權息結果表",
+    )
+    check("缺少關鍵欄位要丟例外", False, "沒有丟例外")
+except RuntimeError:
+    check("缺少關鍵欄位要丟例外", True)
+
+
 # ==========================================================================
 print()
 if FAILURES:

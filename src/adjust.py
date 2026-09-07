@@ -48,8 +48,9 @@
    官方是「2026-07-10 參考價 519.00」，日期和數字都不對。
    所以偵測到的疑似配息一律標 `ignore`，不套用猜來的數字。
 
-上櫃（TPEX）目前沒有接對應的結果表，上櫃標的的除權息要手動補登，
-格式見 `config/corporate_actions.yaml` 的說明。
+上市與上櫃各有一張結果表，`--fetch` 兩張都會抓（`fetch_twse_month()` /
+`fetch_tpex_month()`）。仍然抓不到的才需要手動補登，格式見
+`config/corporate_actions.yaml` 的說明。
 """
 
 from __future__ import annotations
@@ -405,6 +406,11 @@ def implied_action_from_quote(
 # 實測 3034 用開盤價估出來的除息日是 2026-07-13、參考價 494.00，
 # 官方是 2026-07-10、519.00，日期和數字都不對。
 TWSE_EXRIGHT_URL = "https://www.twse.com.tw/rwd/zh/exRight/TWT49U"
+
+# TPEX 的同一張表。頁面是 announce/market/ex/cal.html，
+# 它背後打的就是這支；Referer 沒帶會被擋。
+TPEX_EXRIGHT_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ"
+TPEX_EXRIGHT_PAGE = "https://www.tpex.org.tw/zh-tw/announce/market/ex/cal.html"
 _BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
@@ -412,40 +418,39 @@ _BROWSER_UA = (
 
 
 def _roc_date_to_iso(text: str) -> str | None:
-    """'115年06月11日' -> '2026-06-11'。看不懂就回 None。"""
+    """民國日期轉 ISO。看不懂就回 None。
+
+    兩個端點的格式不一樣，這裡一起認得：
+    TWSE 給「115年06月11日」，TPEX 給「115/09/07」。
+    """
     text = str(text).strip()
     try:
-        year, rest = text.split("年", 1)
-        month, rest = rest.split("月", 1)
-        day = rest.replace("日", "").strip()
+        if "年" in text:
+            year, rest = text.split("年", 1)
+            month, rest = rest.split("月", 1)
+            day = rest.replace("日", "").strip()
+        else:
+            year, month, day = text.split("/")
         return f"{int(year) + 1911:04d}-{int(month):02d}-{int(day):02d}"
     except (ValueError, AttributeError):
         return None
 
 
-def fetch_twse_month(year: int, month: int, timeout: int = 25) -> list[Action]:
-    """抓 TWSE 某個月的除權息結果表。回傳該月所有標的的行為。
+def _actions_from_result_table(
+    fields: list[str],
+    rows: list,
+    *,
+    source: str,
+    table_name: str,
+) -> list[Action]:
+    """把一頁除權息結果表轉成 Action。TWSE 與 TPEX 共用這一段。
+
+    兩個交易所的結果表欄名幾乎一樣（TWSE 叫「股票代號」、TPEX 叫「代號」），
+    日期格式的差異由 _roc_date_to_iso() 吸收。共用的理由是下次改因子規則時
+    只會有一個地方要改——各寫一份的話，改完只有一邊生效是遲早的事。
 
     欄位位置不寫死——用標題文字去找，端點改版加欄位時才不會靜靜錯位。
     """
-    import requests
-
-    resp = requests.get(
-        TWSE_EXRIGHT_URL,
-        params={
-            "startDate": f"{year:04d}{month:02d}01",
-            "endDate": f"{year:04d}{month:02d}31",
-            "response": "json",
-        },
-        timeout=timeout,
-        headers={"User-Agent": _BROWSER_UA},
-    )
-    resp.raise_for_status()
-    payload = resp.json()
-    if str(payload.get("stat", "")).upper() != "OK":
-        return []
-
-    fields = [str(f).strip() for f in (payload.get("fields") or [])]
 
     def index_of(*keywords: str) -> int | None:
         for idx, name in enumerate(fields):
@@ -453,19 +458,19 @@ def fetch_twse_month(year: int, month: int, timeout: int = 25) -> list[Action]:
                 return idx
         return None
 
-    i_date = index_of("資料日期")
-    i_code = index_of("股票代號")
-    i_name = index_of("股票名稱")
+    i_date = index_of("資料日期", "除權息日期")
+    i_code = index_of("股票代號", "代號")
+    i_name = index_of("股票名稱", "名稱")
     i_prev = index_of("除權息前收盤價")
     i_ref = index_of("除權息參考價")
     i_kind = index_of("權/息")
     if None in (i_date, i_code, i_prev, i_ref):
         raise RuntimeError(
-            f"除權息結果表的欄位跟預期不符，可能改版了：{fields}"
+            f"{table_name}的欄位跟預期不符，可能改版了：{fields}"
         )
 
     out: list[Action] = []
-    for row in payload.get("data") or []:
+    for row in rows or []:
         try:
             iso = _roc_date_to_iso(row[i_date])
             prev_close = float(str(row[i_prev]).replace(",", ""))
@@ -495,14 +500,94 @@ def fetch_twse_month(year: int, month: int, timeout: int = 25) -> list[Action]:
                 # 它們的因子一定遠低於 SPLIT_FACTOR_MAX。
                 kind=_infer_kind(factor),
                 note=(
-                    f"TWSE 除權息結果表{f'（{name}）' if name else ''}："
+                    f"{table_name}{f'（{name}）' if name else ''}："
                     f"前收 {prev_close:g} → 參考價 {ref_price:g}"
                     f"，權值+息值 {value:g}{f'（{label}）' if label else ''}"
                 ),
-                source="twse",
+                source=source,
             )
         )
     return out
+
+
+def fetch_twse_month(year: int, month: int, timeout: int = 25) -> list[Action]:
+    """抓 TWSE 某個月的除權息結果表。回傳該月所有標的的行為。"""
+    import requests
+
+    resp = requests.get(
+        TWSE_EXRIGHT_URL,
+        params={
+            "startDate": f"{year:04d}{month:02d}01",
+            "endDate": f"{year:04d}{month:02d}31",
+            "response": "json",
+        },
+        timeout=timeout,
+        headers={"User-Agent": _BROWSER_UA},
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if str(payload.get("stat", "")).upper() != "OK":
+        return []
+
+    return _actions_from_result_table(
+        [str(f).strip() for f in (payload.get("fields") or [])],
+        payload.get("data") or [],
+        source="twse",
+        table_name="TWSE 除權息結果表",
+    )
+
+
+def fetch_tpex_month(year: int, month: int, timeout: int = 25) -> list[Action]:
+    """抓 TPEX 某個月的除權息結果表。回傳該月所有標的的行為。
+
+    上櫃標的（觀察清單裡的 3324、6488）不在 TWSE 的表上，
+    沒有這一支就只能手動補登，而手動補登的實際結果是「沒有人補」——
+    2026-09-07 查出來 15 檔一筆登記都沒有，就是這麼來的。
+
+    兩個跟 TWSE 不一樣、而且都踩過的地方：
+
+    1. **要用 POST，日期是補零的民國格式** `114/07/01`。
+       送 `114/7/1` 或西元 `20250701` 不會報錯，它會安靜地回傳
+       「最近一次除權息」那幾筆——看起來成功，資料卻是錯的月份。
+    2. 資料包在 `tables[0]` 裡，不像 TWSE 直接放在最上層。
+    """
+    import requests
+
+    from calendar import monthrange
+
+    last_day = monthrange(year, month)[1]
+    roc = year - 1911
+    resp = requests.post(
+        TPEX_EXRIGHT_URL,
+        data={
+            # 補零不是龜毛，是這個端點唯一吃的格式。見上面 docstring。
+            "startDate": f"{roc:03d}/{month:02d}/01",
+            "endDate": f"{roc:03d}/{month:02d}/{last_day:02d}",
+            "response": "json",
+        },
+        timeout=timeout,
+        headers={
+            "User-Agent": _BROWSER_UA,
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": TPEX_EXRIGHT_PAGE,
+        },
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if str(payload.get("stat", "")).lower() != "ok":
+        return []
+
+    tables = payload.get("tables") or []
+    if not tables:
+        return []
+    table = tables[0]
+
+    return _actions_from_result_table(
+        [str(f).strip() for f in (table.get("fields") or [])],
+        table.get("data") or [],
+        source="tpex",
+        table_name="TPEX 除權息結果表",
+    )
 
 
 def scan_quotes(quotes: dict, codes: list[str]) -> list[Action]:
@@ -597,7 +682,8 @@ _ACTIONS_HEADER = '''# =========================================================
 #   ref_price   也可以改填這兩個讓系統自己算 factor，比較好稽核——
 #   prev_close    這兩個數字就是公告上印的
 #   kind        split（分割，會連成交量一起還原）| dividend（配息，不動量）
-#   source      detected（自動偵測）| manual（手動補登）| quote（行情反推）
+#   source      twse / tpex（官方結果表，最準）| detected（自動偵測）
+#               | manual（手動補登）| quote（行情反推）
 #   ignore      設 true = 保留這筆紀錄但不套用（用來標記誤判）
 #   note        給人看的說明
 #
@@ -619,7 +705,7 @@ _ACTIONS_HEADER = '''# =========================================================
 
 
 def _do_fetch(args, existing: dict[str, list[Action]]) -> int:
-    """從 TWSE 抓官方除權息資料，只留下我們有在追蹤的代號。"""
+    """從 TWSE 與 TPEX 抓官方除權息資料，只留下我們有在追蹤的代號。"""
     import time
     from datetime import date
 
@@ -644,22 +730,30 @@ def _do_fetch(args, existing: dict[str, list[Action]]) -> int:
             year, month = year - 1, 12
     months.reverse()
 
-    print(f"從 TWSE 除權息結果表抓 {len(months)} 個月，"
+    print(f"從 TWSE／TPEX 除權息結果表抓 {len(months)} 個月，"
           f"比對 {len(tracked)} 檔追蹤中的標的…\n")
 
     found: list[Action] = []
     failures: list[str] = []
+    # 上市與上櫃分兩張表。少抓哪一張，那個市場的標的就會安靜地留著
+    # 未還原的除息缺口——那正是 2026-09-07 查出 15 檔沒登記的原因之一。
+    sources = (("上市", fetch_twse_month), ("上櫃", fetch_tpex_month))
     for year, month in months:
-        try:
-            rows = fetch_twse_month(year, month)
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"{year}-{month:02d}（{type(exc).__name__}）")
-            continue
-        hits = [a for a in rows if a.code in tracked]
-        found.extend(hits)
-        print(f"  {year}-{month:02d}  該月 {len(rows):>3} 筆，"
-              f"其中我們追蹤的 {len(hits)} 筆")
-        time.sleep(1.5)   # 對端點客氣一點，被擋了反而更慢
+        counts: list[str] = []
+        for label, fetch in sources:
+            try:
+                rows = fetch(year, month)
+            except Exception as exc:  # noqa: BLE001
+                failures.append(
+                    f"{year}-{month:02d} {label}（{type(exc).__name__}）"
+                )
+                counts.append(f"{label} 抓失敗")
+                continue
+            hits = [a for a in rows if a.code in tracked]
+            found.extend(hits)
+            counts.append(f"{label} {len(rows):>3} 筆 / 追蹤中 {len(hits)}")
+            time.sleep(1.5)   # 對端點客氣一點，被擋了反而更慢
+        print(f"  {year}-{month:02d}  " + "，".join(counts))
 
     if failures:
         print(f"\n⚠️  這些月份抓失敗，稍後可以重跑補上：{'、'.join(failures)}")
@@ -707,7 +801,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--fetch", action="store_true",
-        help="從 TWSE 除權息結果表抓官方參考價（準確，優先用這個）",
+        help="從 TWSE／TPEX 除權息結果表抓官方參考價（準確，優先用這個）",
     )
     parser.add_argument(
         "--months", type=int, default=24,
