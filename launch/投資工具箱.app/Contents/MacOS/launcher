@@ -63,7 +63,8 @@ set options to {¬
   "🩺 檢查資料源是否正常", ¬
   "⏰ 安裝每日自動更新", ¬
   "⏰ 移除每日自動更新", ¬
-  "🔧 安裝與設定（安裝套件）"}
+  "🔧 安裝與設定（安裝套件）", ¬
+  "🆙 更新到最新版本（拉程式與帳本、重建捷徑）"}
 set picked to choose from list options ¬
   with title "投資工具箱" ¬
   with prompt "要做什麼？" ¬
@@ -99,6 +100,8 @@ case "$CHOICE" in
     run_in_terminal "移除每日排程" "bash launch/install_daily.sh --uninstall" ;;
   "🔧 安裝與設定（安裝套件）")
     run_in_terminal "安裝套件" "'$PY' -m pip install -r requirements.txt" ;;
+  "🆙 更新到最新版本（拉程式與帳本、重建捷徑）")
+    run_in_terminal "更新到最新版本" "bash launch/update.sh --no-pause" ;;
   *)
     alert "未知的選項：$CHOICE" ;;
 esac

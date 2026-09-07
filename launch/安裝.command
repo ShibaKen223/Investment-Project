@@ -72,9 +72,13 @@ if [[ -d "$DESKTOP" ]]; then
     dst="$DESKTOP/$app.app"
     [[ -d "$src" ]] || continue
     chmod +x "$src/Contents/MacOS/launcher" 2>/dev/null
-    if [[ -e "$dst" || -L "$dst" ]]; then
-      echo "   $app.app 已在桌面上，略過"
+    # 已經存在就略過是錯的：桌面上那份可能指向舊位置（專案搬過家），
+    # 或根本是複製的一份死檔案——而「重跑安裝」正是遇到這種情況時
+    # 唯一會想到的救法，略過等於這條路救不回來。指對地方才略過。
+    if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
+      echo "   $app.app 已在桌面上而且指向這個專案，略過"
     else
+      [[ -e "$dst" || -L "$dst" ]] && rm -rf "$dst"
       ln -s "$src" "$dst" && ok "$app.app 已放到桌面"
     fi
   done

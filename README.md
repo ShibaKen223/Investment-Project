@@ -93,6 +93,35 @@ powershell -ExecutionPolicy Bypass -File launch\win\install_daily.ps1
 
 ---
 
+## 更新到最新版本
+
+**macOS：雙擊 `launch/更新.command`。**
+**Windows：雙擊 `launch\win\更新.bat`。**
+（工具箱裡也有同一項，macOS 是「🆙 更新到最新版本」，Windows 是 `13`。）
+
+它做三件事，不會問你任何問題：
+
+1. `git pull --ff-only` —— 程式和**帳本**一起拉下來（`data/paper_state.json`、
+   淨值紀錄、日報、歷史日 K 都在版控裡，所以 pull 完就是最新的那本帳）。
+2. **重新指向桌面捷徑。** 專案資料夾搬過位置，或桌面上那份當初是「複製」
+   而不是替身，捷徑就會指到錯的地方——症狀不是報錯，是它在錯的位置建一個
+   `data/` 然後你在專案裡怎麼找都找不到。每次更新都重指一遍。
+3. **把拉下來的帳本印出來。** 最後成交日、現金、持股、淨值，還有
+   `owner`（這本帳是哪台機器在寫的）。
+
+用 `--ff-only` 是刻意的，跟排程那支同一個理由：能快轉就快轉，
+已經分岔就停下來讓你決定留哪一邊，而不是自動 merge 出第三本帳。
+遇到下面兩種情況它會停下來並告訴你原因：
+
+| 它說 | 意思 | 怎麼辦 |
+| --- | --- | --- |
+| 本機有還沒提交的變更（含 `data/paper_*`） | 這台自己跑出來的帳還沒推上去，pull 會蓋掉 | `git add data && git commit -m '本機帳本' && git push` |
+| 本機與遠端已經分岔 | 兩台機器各記了一本帳 | 見 `docs/HANDOFF.md` 的「兩本帳」，自己選一邊 |
+
+`requirements.txt` 在這次更新裡變過的話，它也會提醒你重裝套件。
+
+---
+
 ## 六個頁面
 
 | 頁面 | 用途 |
@@ -502,7 +531,12 @@ data/raw/               每日全市場原始存檔（不進版控，太大，�
 data/backups/           每次修改設定前的自動備份（保留最近 50 份）
 
 launch/安裝.command      macOS 一鍵安裝
+launch/更新.command      macOS 一鍵更新（拉最新版、重指捷徑、印帳本）
+launch/update.sh        更新的實作，工具箱也叫這支
+launch/ledger_summary.py 更新完印帳本現況，兩個平台共用
 launch/daily_run.sh     macOS 每日排程呼叫的流程
+launch/win/安裝.bat      Windows 一鍵安裝
+launch/win/更新.bat      Windows 一鍵更新
 launch/dashboard.bat    Windows 開儀表板
 launch/daily_run.bat    Windows 每日排程呼叫的流程（daily_run.sh 的移植）
 ```

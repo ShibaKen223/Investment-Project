@@ -41,6 +41,7 @@ while ($true) {
   Write-Host " 10  移除每日自動更新"
   Write-Host " 11  查看排程狀態"
   Write-Host " 12  重新安裝套件"
+  Write-Host " 13  更新到最新版本（拉程式與帳本、重建捷徑）"
   Write-Host ""
   Write-Host "  0  離開"
   Write-Host ""
@@ -66,6 +67,7 @@ while ($true) {
     '10' { Invoke-Step '移除每日自動更新'   { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install_daily.ps1') -Uninstall } }
     '11' { Invoke-Step '排程狀態'           { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install_daily.ps1') -Status } }
     '12' { Invoke-Step '重新安裝套件'       { & $py -m pip install -r requirements.txt } }
+    '13' { Invoke-Step '更新到最新版本'     { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'update.ps1') -NoPause } }
     '0'  { exit 0 }
     default {
       Write-Host "沒有這個編號。" -ForegroundColor Yellow
