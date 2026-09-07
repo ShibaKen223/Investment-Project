@@ -457,6 +457,46 @@ data/paper_equity.jsonl 每日淨值曲線                    ← append-only
 - 回測**沒有**模擬「買不到」的情況，假設你要的張數在開盤都成交得掉。
   對日均量 500 張以上、每次只買 20% 部位的規模還算合理，資金放大後會失真。
 
+### 重置模擬倉（設定改掉之後）
+
+模擬倉的績效只有在「產生它的設定 == 現在的設定」時才說得上話。
+真的發生過一次不是這樣的：`trade_unit` 改成 1（開放零股）之前只能買整張，
+本金 100 萬、每檔 20% ＝ 預算 20 萬，觀察清單 57 檔裡有 **31 檔買不起**——
+金融是唯一 5 檔全部買得起的產業，PCB 與電子零組件則是一檔都買不到。
+選股論述寫的是 AI 供應鏈，帳上跑的是另一個標的池。
+
+那種紀錄不是「不好看」，是**用一台壞掉的儀器量出來的**，該整段作廢：
+
+```bash
+python3 src/paper_reset.py --dry-run --reason "哪個設定變了、為什麼舊紀錄失效"
+python3 src/paper_reset.py --reason "..."     # 確認無誤再拿掉 --dry-run
+```
+
+它把 `data/paper_*.json(l)` **複製**到 `data/archive/paper-reset-<時間戳>/`、
+逐檔記 SHA-256、寫一份 `MANIFEST.json`（理由、當下帳況、設定快照），
+驗完雜湊才移除原檔並開新帳，最後把這次重置寫進 `config/paper.yaml` 的 changelog。
+`--reason` 是必填的，而且**只歸檔、不刪除**——理由很簡單：
+真的刪掉的話，重置這個動作在事後就跟「藏起難看的結果」無法區分。
+
+它刻意**不在**「投資工具箱」的選單裡。這不是每天會用的東西，
+一個作廢整段紀錄的動作不該離一次誤點只有一步。
+
+**不要改用「把持股全賣掉」代替。** `paper_trades.jsonl` 是 append-only、
+刻意設計成狀態檔重建也還在，而 `performance()` 對它一視同仁。
+賣掉會在裡面留下 N 筆完成交易：進場來自壞設定、出場是人為的
+（不是停損、不是停利、也不是 `max_hold_bars`），卻照樣算進勝率、獲利因子
+與 objective 的樣本數。那是為了清掉污染而製造污染。
+
+要作廢的只有**個別幾筆**、不是整段時，用 `paper.append_void()`：
+它 append 一筆註銷紀錄而不改寫原行，`load_trades()` 預設就把它濾掉
+（稽核要看完整原始紀錄時傳 `include_void=True`）。
+
+判準寫在 changelog 裡，重置時會自動帶上：
+**因正確性錯誤而變更設定 → 作廢重起；因偏好或門檻變更 → 不作廢。**
+差別是「量錯了」還是「標準改了」，後者作廢紀錄就是搬門柱。
+
+---
+
 ---
 
 ## 訊號說明
@@ -565,6 +605,8 @@ python3 tests/test_monitor.py     # 監控層接引擎部位：停損線必須�
 python3 tests/test_store.py       # 透過介面改設定不會弄壞 YAML
 python3 tests/test_paper.py       # 交易成本、進出場訊號、成交、名額上限、
                                   #   累計績效的來源、狀態檔壞掉的行為
+python3 tests/test_paper_reset.py # 重置只歸檔不刪除、失敗不留半套、
+                                  #   註銷交易不改寫原行
 python3 tests/test_history.py     # 日 K 存取、民國日期、TWSE 解析
 python3 tests/test_backtest.py    # 回測引擎的不變式（合成資料，不連網）
 python3 tests/test_research.py    # 指標計算、ATR、名詞查詢、知識庫完整性

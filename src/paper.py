@@ -28,7 +28,8 @@
 
 檔案:
     data/paper_state.json    當前現金、持股、待執行委託（會覆寫）
-    data/paper_trades.jsonl  每一筆成交（append-only，永不改寫）
+    data/paper_trades.jsonl  每一筆成交（append-only，永不改寫；
+                             作廢是再 append 一筆註銷紀錄，見 append_void）
     data/paper_equity.jsonl  每日淨值（append-only，畫績效曲線用）
     data/paper_runs.jsonl    每次執行的稽核紀錄（append-only，見 append_run）
 """
@@ -37,6 +38,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime
 from dataclasses import dataclass, field, asdict, fields as dataclass_fields
 from pathlib import Path
 
@@ -763,6 +765,52 @@ def append_trade(trade: Trade) -> None:
     _append_jsonl(TRADES_FILE, trade.to_dict())
 
 
+# 作廢一筆已平倉交易，用「再 append 一筆註銷紀錄」而不是改寫原本那一行。
+#
+# 為什麼不直接改掉：這份檔案的價值就在「寫下去就不會再變」——
+# 一本可以改寫的帳沒辦法證明自己沒被改過，而模擬倉的全部意義是當證據。
+#
+# 但作廢的需求是真的：設定被修掉一個**正確性錯誤**之後（例如 38743e2
+# 開放零股之前，只能買整張讓 57 檔的掃描池實際只剩 26 檔、金融是唯一
+# 全數可買的產業），舊設定產生的交易不該再算進勝率與獲利因子——
+# 那是拿壞掉的儀器量出來的數字。
+#
+# 兩者的交集就是註銷紀錄：原始那一行原封不動留著，旁邊多一行說
+# 「這筆不計入，理由是 X，時間是 Y」。稽核時兩行都在，看得出發生過什麼；
+# 算績效時 load_trades() 預設把它濾掉。
+#
+# ⚠️ 這是給「設定錯誤」用的，不是給「這筆賠錢我不想算」用的。
+#    判準寫在 config/paper.yaml 的 changelog 裡，理由欄位是必填的。
+VOID_RECORD_TYPE = "void"
+
+
+def append_void(
+    code: str,
+    entry_date: str,
+    exit_date: str,
+    reason: str,
+    voided_at: str = "",
+) -> None:
+    """作廢一筆已平倉交易（見 VOID_RECORD_TYPE 上方的說明）。
+
+    用 (code, entry_date, exit_date) 認一筆交易——同一檔在同一段趨勢裡
+    可能反覆進出，只用代號會一次註銷掉全部。
+    """
+    if not str(reason).strip():
+        raise ValueError("作廢一定要寫理由——沒有理由的作廢跟竄改沒有分別。")
+    _append_jsonl(
+        TRADES_FILE,
+        {
+            "record_type": VOID_RECORD_TYPE,
+            "code": str(code),
+            "entry_date": str(entry_date),
+            "exit_date": str(exit_date),
+            "reason": str(reason).strip(),
+            "voided_at": voided_at or datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     """讀 append-only 紀錄檔。壞掉的行跳過，不要讓一行爛資料擋住整份歷史。"""
     if not path.exists():
@@ -780,23 +828,46 @@ def _read_jsonl(path: Path) -> list[dict]:
     return records
 
 
-def load_trades() -> list[Trade]:
-    """讀回**所有**已完成的來回交易，最舊的在前面。
+def load_trades(include_void: bool = False) -> list[Trade]:
+    """讀回已完成的來回交易，最舊的在前面。
 
     這是累計績效的唯一來源。狀態檔只記「現在還持有什麼」，
     平倉紀錄全在這裡——就算狀態檔壞掉重建，這份也還在。
 
     to_dict() 會多寫 gross_pnl / net_pnl / net_pnl_pct 三個衍生欄位（給人看的），
     它們不是 Trade 的建構參數，所以這裡要濾掉再還原。
+
+    **被註銷的交易預設不會回傳**（見 append_void）。預設就排除是刻意的：
+    這個專案已經吃過一次「規則只寫在散文裡，該用到的那天沒人記得」的虧
+    （認錯條件原本只是 YAML 註解，沒有任何程式在檢查）。
+    要是預設含進來、由每個呼叫端自己記得過濾，那就是同一個坑——
+    而且漏掉時不會報錯，只會安靜地把作廢的交易算進勝率。
+    稽核、要看完整原始紀錄時才傳 include_void=True。
     """
     names = {f.name for f in dataclass_fields(Trade)}
     trades: list[Trade] = []
+    voided: set[tuple[str, str, str]] = set()
+
     for record in _read_jsonl(TRADES_FILE):
+        # 舊紀錄沒有 record_type 這個 key，get() 回 None，會走成交那一支。
+        if record.get("record_type") == VOID_RECORD_TYPE:
+            voided.add((
+                str(record.get("code", "")),
+                str(record.get("entry_date", "")),
+                str(record.get("exit_date", "")),
+            ))
+            continue
         try:
             trades.append(Trade(**{k: v for k, v in record.items() if k in names}))
         except TypeError:
             continue   # 舊格式缺欄位，跳過而不是整份炸掉
-    return trades
+
+    if include_void or not voided:
+        return trades
+    return [
+        t for t in trades
+        if (t.code, t.entry_date, t.exit_date) not in voided
+    ]
 
 
 def load_equity_curve() -> list[dict]:
