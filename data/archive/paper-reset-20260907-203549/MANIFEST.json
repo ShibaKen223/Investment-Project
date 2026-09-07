@@ -1,0 +1,87 @@
+{
+  "reset_at": "2026-09-07T20:35:49",
+  "reason": "38743e2 修掉 trade_unit 只能買整張的正確性錯誤：修正前 57 檔掃描池實際只有 26 檔買得起，金融是唯一全數可買的產業，PCB 與電子零組件一檔都買不到。08-20～09-04 的紀錄是那個標的池產生的，不能拿來評估現行設定。",
+  "machine": "DESKTOP-E5L1M99",
+  "at_reset": {
+    "equity_rows": 13,
+    "run_rows": 12,
+    "closed_trades": 0,
+    "first_date": "2026-08-20",
+    "last_date": "2026-09-07",
+    "final_equity": 1043951.98,
+    "state": "ok",
+    "open_positions": [
+      "00919",
+      "1301",
+      "2881",
+      "2884",
+      "2891"
+    ],
+    "cash": 73063.18,
+    "owner": "DESKTOP-E5L1M99",
+    "pending": [
+      "2454"
+    ]
+  },
+  "initial_cash_after_reset": 1000000.0,
+  "config_after_reset": {
+    "account": {
+      "initial_cash": 1000000,
+      "position_pct": 10.0,
+      "max_positions": 10,
+      "trade_unit": 1,
+      "min_position_value": 30000
+    },
+    "costs": {
+      "fee_rate": 0.001425,
+      "fee_discount": 0.6,
+      "fee_minimum": 20,
+      "tax_rate": 0.003,
+      "slippage_pct": 0.1
+    },
+    "strategy": {
+      "trend_ma": 60,
+      "momentum_ma": 20,
+      "breakout_lookback": 20,
+      "min_avg_volume": 500000,
+      "volume_ma": 20,
+      "stop_mode": "pct",
+      "stop_loss_pct": 8.0,
+      "take_profit_pct": 15.0,
+      "atr_period": 14,
+      "atr_stop_multiple": 2.0,
+      "atr_target_multiple": 3.5,
+      "max_hold_bars": 15,
+      "trailing_stop_pct": 0.0
+    },
+    "data_guard": {
+      "min_ready_codes": 10
+    }
+  },
+  "files": [
+    {
+      "label": "state",
+      "name": "paper_state.json",
+      "bytes": 2563,
+      "sha256": "e985e833b0c0a1402a3b60854ba13bc32acc0f2ba443a7965d70555d886371b9"
+    },
+    {
+      "label": "state_backup",
+      "name": "paper_state.json.bak",
+      "bytes": 2221,
+      "sha256": "fecd301b8f561e86a4d390a47283654f20ab439f31ec88303708c0ad6e8001f5"
+    },
+    {
+      "label": "equity",
+      "name": "paper_equity.jsonl",
+      "bytes": 1097,
+      "sha256": "b94b8dd472ee9ec1776af12530143940ed7cd65fe138c6b5edb1bdd2b91c4795"
+    },
+    {
+      "label": "runs",
+      "name": "paper_runs.jsonl",
+      "bytes": 2743,
+      "sha256": "322532965665b0e62d0767d5dd6f1cfaf7af502ad998de447136ec9c6cea3214"
+    }
+  ]
+}
