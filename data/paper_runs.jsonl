@@ -1,2 +1,3 @@
 {"ran_at": "2026-09-08T15:12:53", "trade_date": "2026-09-07", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 5, "fills": 0, "orders": 5, "holdings": 0, "equity": 1000000.0, "cash": 1000000.0}
 {"ran_at": "2026-09-08T17:42:32", "trade_date": "2026-09-08", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 3, "fills": 5, "orders": 2, "holdings": 5, "equity": 988944.77, "cash": 506510.92}
+{"ran_at": "2026-09-09T15:20:06", "trade_date": "2026-09-08", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "already_ran"}
