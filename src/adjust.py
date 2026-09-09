@@ -178,6 +178,24 @@ def _entry_factor(entry: dict) -> float:
     return float(entry["ref_price"]) / float(entry["prev_close"])
 
 
+def _kind_from_label(label: str, factor: float) -> str:
+    """官方的「權/息」標籤優先，沒有標籤才退回用因子大小猜。
+
+    為什麼標籤要優先：因子那條規則隱含「配息不可能讓價格掉超過 40%」，
+    而 2603 長榮 2023-06-30 配 70 元現金、前收 155 → 參考價 85
+    （因子 0.548）正好打破它。純配息不改變股數，被當成分割的話，
+    2603 在那天之前的成交量會被放大 1.82 倍——而策略有一條
+    「近 20 日均量 ≥ 500 張」的流動性門檻在讀這個數字。
+
+    標籤有「息」而沒有「權」就一定不動量。有「權」才回到因子判斷：
+    台股的除權多半只配幾十股，因子在 0.99 上下，那種規模的量還原是雜訊；
+    真正要還原的 1:2、1:4 分割，因子一定遠低於 SPLIT_FACTOR_MAX。
+    """
+    if label and "權" not in label:
+        return "dividend"
+    return _infer_kind(factor)
+
+
 def _infer_kind(factor: float) -> str:
     return "split" if factor < SPLIT_FACTOR_MAX else "dividend"
 
@@ -491,14 +509,8 @@ def _actions_from_result_table(
                 code=str(row[i_code]).strip(),
                 date=iso,
                 factor=factor,
-                # 用因子大小分類，而不是「權/息」這個標籤。
-                # 配股確實會改變股數，但台股的除權多半只配個幾十股，
-                # 因子在 0.99 上下——那種規模的成交量還原純粹是雜訊，
-                # 而且「權息一起發」時價格因子跟配股比例本來就不相等，
-                # 硬拿它去調量反而引入誤差。
-                # 真正需要還原成交量的是 1:2、1:4 那種分割，
-                # 它們的因子一定遠低於 SPLIT_FACTOR_MAX。
-                kind=_infer_kind(factor),
+                # 先看官方標籤，沒有標籤才用因子大小——理由見 _kind_from_label()。
+                kind=_kind_from_label(label, factor),
                 note=(
                     f"{table_name}{f'（{name}）' if name else ''}："
                     f"前收 {prev_close:g} → 參考價 {ref_price:g}"
