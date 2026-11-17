@@ -50,3 +50,4 @@
 {"ran_at": "2026-11-13T15:13:31", "trade_date": "2026-11-12", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 0, "fills": 1, "orders": 0, "holdings": 3, "equity": 925008.51, "cash": 631821.21}
 {"ran_at": "2026-11-13T17:43:11", "trade_date": "2026-11-13", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 2, "fills": 0, "orders": 2, "holdings": 3, "equity": 929337.26, "cash": 631821.21}
 {"ran_at": "2026-11-16T21:50:40", "trade_date": "2026-11-16", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 0, "fills": 2, "orders": 0, "holdings": 5, "equity": 914005.18, "cash": 453256.78}
+{"ran_at": "2026-11-17T19:56:40", "trade_date": "2026-11-17", "universe": 54, "with_bars": 54, "ready": 54, "short": 0, "status": "ok", "entry_signals": 0, "fills": 0, "orders": 3, "holdings": 5, "equity": 909506.58, "cash": 453256.78}
