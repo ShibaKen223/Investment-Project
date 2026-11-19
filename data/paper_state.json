@@ -1,6 +1,6 @@
 {
-  "cash": 717029.13,
-  "last_date": "2026-11-18",
+  "cash": 806903.22,
+  "last_date": "2026-11-19",
   "owner": "DESKTOP-E5L1M99",
   "positions": {
     "2618": {
@@ -11,30 +11,9 @@
       "entry_fee": 76.0,
       "entry_reason": "收盤 45.10 站上 60 日均線 42.37；收盤站上 20 日均線 42.81；突破前 20 日高點 44.60；近 20 日均量 18366 張，流動性足夠",
       "peak_close": 48.1,
-      "bars_held": 8,
-      "entry_atr": 0.0
-    },
-    "2891": {
-      "code": "2891",
-      "shares": 1179,
-      "entry_price": 79.87979999999999,
-      "entry_date": "2026-11-16",
-      "entry_fee": 80.0,
-      "entry_reason": "收盤 78.70 站上 60 日均線 69.85；收盤站上 20 日均線 74.53；突破前 20 日高點 76.90；近 20 日均量 46617 張，流動性足夠",
-      "peak_close": 79.87979999999999,
-      "bars_held": 2,
+      "bars_held": 9,
       "entry_atr": 0.0
     }
   },
-  "pending": [
-    {
-      "code": "2891",
-      "side": "SELL",
-      "shares": 1179,
-      "decided_on": "2026-11-18",
-      "reason": "STOP_LOSS",
-      "detail": "🔴 停損：收盤 73.40 跌破停損線 73.49（-8.11%，停損基準 固定 8%）",
-      "atr": 0.0
-    }
-  ]
+  "pending": []
 }
