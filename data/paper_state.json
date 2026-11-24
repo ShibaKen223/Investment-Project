@@ -1,6 +1,6 @@
 {
   "cash": 806903.22,
-  "last_date": "2026-11-23",
+  "last_date": "2026-11-24",
   "owner": "DESKTOP-E5L1M99",
   "positions": {
     "2618": {
@@ -10,8 +10,8 @@
       "entry_date": "2026-11-06",
       "entry_fee": 76.0,
       "entry_reason": "收盤 45.10 站上 60 日均線 42.37；收盤站上 20 日均線 42.81；突破前 20 日高點 44.60；近 20 日均量 18366 張，流動性足夠",
-      "peak_close": 48.1,
-      "bars_held": 11,
+      "peak_close": 48.6,
+      "bars_held": 12,
       "entry_atr": 0.0
     }
   },
